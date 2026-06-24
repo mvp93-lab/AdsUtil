@@ -1,0 +1,11 @@
+package com.mvp93.adsutil.utils
+
+object AdsConstants {
+    const val ADS_APP_TEST_ID = "ca-app-pub-3940256099942544~3347511713"
+    const val AD_BANNER_TEST_ID = "ca-app-pub-3940256099942544/6300978111"
+    const val AD_NATIVE_TEST_ID = "ca-app-pub-3940256099942544/2247696110"
+    const val AD_INTERSTITIAL_TEST_ID = "ca-app-pub-3940256099942544/1033173712"
+    const val ADS_OPEN_APP_TEST_ID = "ca-app-pub-3940256099942544/9257395921"
+    const val ADS_ADAPTIVE_BANNER_TEST_ID = "ca-app-pub-3940256099942544/9214589741"
+    const val AD_NATIVE_VIDEO_TEST_ID = "ca-app-pub-3940256099942544/1044960115"
+}
