@@ -1,6 +1,10 @@
+version = "1.0.0"
+group = "com.github.mvp93"
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    id("maven-publish")
 }
 
 android {
@@ -17,6 +21,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -26,13 +37,21 @@ android {
     }
 }
 
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            groupId = "com.github.mvp93"
+            artifactId = "ads-core"
+            version = "1.0.0"
+
+            afterEvaluate {
+                from(components["release"])
+            }
+        }
+    }
+}
+
 dependencies {
-//    implementation(libs.androidx.appcompat)
-//    implementation(platform(libs.androidx.compose.bom))
-//    implementation(libs.androidx.core.ktx)
-//    implementation(libs.material)
-//    implementation(libs.google.ads.next.gen)
-//    implementation(libs.androidx.core.ktx)
     api(libs.google.ads.next.gen)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
