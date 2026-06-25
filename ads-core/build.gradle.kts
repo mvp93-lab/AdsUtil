@@ -41,8 +41,8 @@ publishing {
     publications {
         register<MavenPublication>("release") {
             groupId = "com.github.mvp93-lab"
-            artifactId = "ads-core"
-            version = "1.0.0"
+            artifactId = "ads-util"
+            version = "1.0.1"
 
             afterEvaluate {
                 from(components["release"])
