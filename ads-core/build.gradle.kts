@@ -1,4 +1,4 @@
-version = "1.0.1"
+version = "1.0.2"
 group = "com.github.mvp93-lab"
 
 plugins {
@@ -42,7 +42,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "com.github.mvp93-lab"
             artifactId = "ads-util"
-            version = "1.0.1"
+            version = "1.0.2"
 
             afterEvaluate {
                 from(components["release"])
