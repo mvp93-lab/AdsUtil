@@ -70,13 +70,15 @@ fun SmallNativeAd(
 ) {
     val context = LocalContext.current
     val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
+    val isInitialized by AdManager.isInitialized.collectAsState()
     
     if (!isAdsEnabled) return
 
     var nativeAd by remember { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
     var isLoading by remember { mutableStateOf(nativeAd == null) }
 
-    LaunchedEffect(adUnitId, screenTag) {
+    LaunchedEffect(adUnitId, screenTag, isInitialized) {
+        if (!isInitialized) return@LaunchedEffect
         AdManager.loadNativeAd(
             context = context,
             adUnitId = adUnitId,
@@ -232,13 +234,15 @@ fun BigNativeAd(
 ) {
     val context = LocalContext.current
     val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
+    val isInitialized by AdManager.isInitialized.collectAsState()
 
     if (!isAdsEnabled) return
 
     var nativeAd by remember { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
     var isLoading by remember { mutableStateOf(nativeAd == null) }
 
-    LaunchedEffect(adUnitId, screenTag) {
+    LaunchedEffect(adUnitId, screenTag, isInitialized) {
+        if (!isInitialized) return@LaunchedEffect
         AdManager.loadNativeAd(
             context = context,
             adUnitId = adUnitId,

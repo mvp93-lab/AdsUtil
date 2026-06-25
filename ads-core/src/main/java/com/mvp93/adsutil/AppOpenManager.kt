@@ -32,7 +32,10 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
         // Preload if possible
         if (adUnitId.isNotEmpty()) {
             scope.launch {
-                AdManager.loadAppOpenAd(application, adUnitId)
+                val loaded = AdManager.loadAppOpenAd(application, adUnitId)
+                if (loaded) {
+                    android.widget.Toast.makeText(application, "App Open Ad Preloaded", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -52,13 +55,19 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
                 AdManager.showAppOpenAd(activity) {
                     // Reload for next time
                     scope.launch {
-                        AdManager.loadAppOpenAd(application, adUnitId)
+                        val loaded = AdManager.loadAppOpenAd(application, adUnitId)
+                        if (loaded) {
+                            android.widget.Toast.makeText(application, "App Open Ad Reloaded", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             } else {
                 Log.d("AppOpenManager", "App Open Ad not available, loading one...")
                 scope.launch {
-                    AdManager.loadAppOpenAd(application, adUnitId)
+                    val loaded = AdManager.loadAppOpenAd(application, adUnitId)
+                    if (loaded) {
+                        android.widget.Toast.makeText(application, "App Open Ad Loaded", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }

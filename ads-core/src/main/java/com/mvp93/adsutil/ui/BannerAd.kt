@@ -25,11 +25,12 @@ fun BannerAd(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
+    val isInitialized by AdManager.isInitialized.collectAsState()
 
-    if (!isAdsEnabled) return
+    if (!isAdsEnabled || !isInitialized) return
 
     // Retrieve or create the AdView from the Manager cache
-    val adView = remember(key) {
+    val adView = remember(key, isInitialized) {
         AdManager.getOrCreateBanner(context, key, adUnitId)
     }
 

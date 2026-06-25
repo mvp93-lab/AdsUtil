@@ -84,7 +84,7 @@ object AdManager {
     }
 
     fun getOrCreateBanner(context: Context, key: String, adUnitId: String): AdView? {
-        if (!_isAdsEnabled.value) return null
+        if (!_isInitialized.value || !_isAdsEnabled.value) return null
 
         val finalAdUnitId = if (isDebug(context)) com.mvp93.adsutil.utils.AdsConstants.AD_BANNER_TEST_ID else adUnitId
         return bannerCache.getOrPut(key) {

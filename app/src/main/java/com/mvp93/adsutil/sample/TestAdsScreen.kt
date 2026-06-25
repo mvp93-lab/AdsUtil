@@ -1,6 +1,5 @@
 package com.mvp93.adsutil.sample
 
-import android.app.Activity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -85,11 +84,13 @@ fun TestAdsScreen() {
             coroutineScope.launch {
                 val loaded = AdManager.loadAppOpenAd(context, AdsConstants.ADS_OPEN_APP_TEST_ID)
                 if (loaded) {
-                    AdManager.showAppOpenAd(context as Activity)
+                    android.widget.Toast.makeText(context, "App Open Ad Loaded (will show on next app return)", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(context, "App Open Ad Load Failed", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }) {
-            Text("Load & Show App Open")
+            Text("Load App Open Ad")
         }
         
         Spacer(modifier = Modifier.height(32.dp))
