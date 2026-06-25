@@ -1,5 +1,5 @@
-version = "1.0.2"
-group = "com.github.mvp93-lab"
+version = "1.0.3"
+
 
 plugins {
     alias(libs.plugins.android.library)
