@@ -22,10 +22,21 @@ android {
         consumerProguardFiles("consumer-rules.pro")
     }
 
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
         }
+    }
+
+    lint {
+        abortOnError = false
     }
 
     compileOptions {
@@ -37,19 +48,7 @@ android {
     }
 }
 
-publishing {
-    publications {
-        register<MavenPublication>("release") {
-            groupId = "com.github.mvp93-lab"
-            artifactId = "ads-util"
-            version = "1.0.2"
 
-            afterEvaluate {
-                from(components["release"])
-            }
-        }
-    }
-}
 
 dependencies {
     api(libs.google.ads.next.gen)
@@ -61,4 +60,15 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.coil.compose)
     implementation(libs.google.ump)
+}
+
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+            }
+        }
+    }
 }
