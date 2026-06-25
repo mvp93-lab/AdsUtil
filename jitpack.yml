@@ -1,4 +1,4 @@
 jdk:
   - openjdk17
 install:
-  - ./gradlew :ads-core:assembleRelease
+  - ./gradlew :ads-core:publishToMavenLocal -Pgroup=com.github.mvp93-lab
