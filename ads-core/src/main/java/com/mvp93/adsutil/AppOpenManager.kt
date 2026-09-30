@@ -8,6 +8,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 
+import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,7 +35,7 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
             scope.launch {
                 val loaded = AdManager.loadAppOpenAd(application, adUnitId)
                 if (loaded) {
-                    android.widget.Toast.makeText(application, "App Open Ad Preloaded", android.widget.Toast.LENGTH_SHORT).show()
+                    application.showDebugToast("App Open Ad Preloaded")
                 }
             }
         }
@@ -57,7 +58,7 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
                     scope.launch {
                         val loaded = AdManager.loadAppOpenAd(application, adUnitId)
                         if (loaded) {
-                            android.widget.Toast.makeText(application, "App Open Ad Reloaded", android.widget.Toast.LENGTH_SHORT).show()
+                            application.showDebugToast("App Open Ad Reloaded")
                         }
                     }
                 }
@@ -66,7 +67,7 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
                 scope.launch {
                     val loaded = AdManager.loadAppOpenAd(application, adUnitId)
                     if (loaded) {
-                        android.widget.Toast.makeText(application, "App Open Ad Loaded", android.widget.Toast.LENGTH_SHORT).show()
+                        application.showDebugToast("App Open Ad Loaded")
                     }
                 }
             }

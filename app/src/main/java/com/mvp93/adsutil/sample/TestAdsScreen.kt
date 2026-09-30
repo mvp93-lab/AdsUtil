@@ -14,6 +14,7 @@ import com.mvp93.adsutil.ui.BannerAd
 import com.mvp93.adsutil.ui.BigNativeAd
 import com.mvp93.adsutil.ui.SmallNativeAd
 import com.mvp93.adsutil.utils.AdsConstants
+import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.launch
 
 @Composable
@@ -24,6 +25,7 @@ fun TestAdsScreen() {
     var showBanner by remember { mutableStateOf(false) }
     var showSmallNative by remember { mutableStateOf(false) }
     var showBigNative by remember { mutableStateOf(false) }
+    var rewardCoins by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -84,13 +86,57 @@ fun TestAdsScreen() {
             coroutineScope.launch {
                 val loaded = AdManager.loadAppOpenAd(context, AdsConstants.ADS_OPEN_APP_TEST_ID)
                 if (loaded) {
-                    android.widget.Toast.makeText(context, "App Open Ad Loaded (will show on next app return)", android.widget.Toast.LENGTH_SHORT).show()
+                    context.showDebugToast("App Open Ad Loaded (will show on next app return)")
                 } else {
-                    android.widget.Toast.makeText(context, "App Open Ad Load Failed", android.widget.Toast.LENGTH_SHORT).show()
+                    context.showDebugToast("App Open Ad Load Failed")
                 }
             }
         }) {
             Text("Load App Open Ad")
+        }
+
+        HorizontalDivider()
+
+        // Rewarded Ad
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "🪙 Reward Balance: $rewardCoins points",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Button(onClick = {
+                    coroutineScope.launch {
+                        context.showDebugToast("Loading Rewarded Ad...")
+                        val loaded = AdManager.loadRewarded(context, AdsConstants.AD_REWARDED_TEST_ID)
+                        if (loaded) {
+                            AdManager.showRewarded(
+                                context = context,
+                                adUnitId = AdsConstants.AD_REWARDED_TEST_ID,
+                                onUserEarnedReward = { rewardItem ->
+                                    rewardCoins += rewardItem.amount
+                                    context.showDebugToast("🎉 Earned +${rewardItem.amount} ${rewardItem.type}!")
+                                },
+                                onAdClosed = {
+                                    context.showDebugToast("Rewarded ad closed")
+                                }
+                            )
+                        } else {
+                            context.showDebugToast("Rewarded Ad Load Failed")
+                        }
+                    }
+                }) {
+                    Text("Watch Video for +Points")
+                }
+            }
         }
         
         Spacer(modifier = Modifier.height(32.dp))

@@ -8,6 +8,7 @@ import com.google.android.ump.ConsentForm
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
+import com.mvp93.adsutil.utils.isDebug
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ConsentManager(private val activity: Activity) {
@@ -22,13 +23,13 @@ class ConsentManager(private val activity: Activity) {
     fun requestConsentInfoUpdate(
         onConsentCheckListener: OnConsentCheckListener
     ) {
-        if (isDebug(activity)) {
+        if (activity.isDebug()) {
             // Reset consent state for testing purposes in debug builds
             // This ensures the dialog shows up every time you test
             consentInformation.reset() 
         }
 
-        val debugSettings = if (isDebug(activity)) {
+        val debugSettings = if (activity.isDebug()) {
             ConsentDebugSettings.Builder(activity)
                 .setDebugGeography(ConsentDebugSettings.DebugGeography.DEBUG_GEOGRAPHY_EEA)
                 .addTestDeviceHashedId("C6F069CF4A4DC8F0272DA62232522711")
@@ -106,9 +107,5 @@ class ConsentManager(private val activity: Activity) {
         
         // If the string starts with '1', it means Purpose 1 (Device Access) is granted.
         return purposeConsents.startsWith("1")
-    }
-
-    private fun isDebug(context: Context): Boolean {
-        return (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
 }
