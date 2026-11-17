@@ -63,12 +63,12 @@ dependencyResolutionManagement {
 
 ### 2. Add the Dependency
 
-Latest stable release: **`1.0.5`**
+Latest stable release: **`1.0.6`**
 
 **Option 1: Using Version Catalog (`gradle/libs.versions.toml`) - Recommended**
 ```toml
 [versions]
-adsUtil = "1.0.5"
+adsUtil = "1.0.6"
 
 [libraries]
 ads-util = { group = "com.github.mvp93-lab", name = "ads-util", version.ref = "adsUtil" }
@@ -84,7 +84,7 @@ dependencies {
 **Option 2: Direct dependency in `app/build.gradle.kts`**
 ```kotlin
 dependencies {
-    implementation("com.github.mvp93-lab:ads-util:1.0.5")
+    implementation("com.github.mvp93-lab:ads-util:1.0.6")
 }
 ```
 

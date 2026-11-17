@@ -63,12 +63,12 @@ dependencyResolutionManagement {
 
 ### 2. Thêm Thư Viện
 
-Phiên bản phát hành ổn định hiện tại: **`1.0.5`**
+Phiên bản phát hành ổn định hiện tại: **`1.0.6`**
 
 **Cách 1: Sử dụng Version Catalog (`gradle/libs.versions.toml`) - Khuyên dùng**
 ```toml
 [versions]
-adsUtil = "1.0.5"
+adsUtil = "1.0.6"
 
 [libraries]
 ads-util = { group = "com.github.mvp93-lab", name = "ads-util", version.ref = "adsUtil" }
@@ -83,7 +83,7 @@ dependencies {
 **Cách 2: Thêm trực tiếp vào `app/build.gradle.kts`**
 ```kotlin
 dependencies {
-    implementation("com.github.mvp93-lab:ads-util:1.0.5")
+    implementation("com.github.mvp93-lab:ads-util:1.0.6")
 }
 ```
 
