@@ -218,10 +218,10 @@ fun SmallNativeAd(
                         setTextColor(0xFFFFFFFF.toInt())
                         textSize = 10f
                         setPadding((6 * density).toInt(), (2 * density).toInt(), (6 * density).toInt(), (2 * density).toInt())
-                        setBackground(android.graphics.drawable.GradientDrawable().apply {
+                        background = android.graphics.drawable.GradientDrawable().apply {
                             setColor(0xFF1872E8.toInt())
                             cornerRadius = 4 * density
-                        })
+                        }
                         layoutParams = LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
@@ -259,11 +259,10 @@ fun SmallNativeAd(
                             leftMargin = (8 * density).toInt()
                         }
                         setTextColor(0xFFFFFFFF.toInt())
-                        val shape = android.graphics.drawable.GradientDrawable().apply {
+                        background = android.graphics.drawable.GradientDrawable().apply {
                             setColor(0xFF1872E8.toInt())
                             cornerRadius = 8 * density
                         }
-                        background = shape
                         setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
                         textSize = 12f
                         setTypeface(null, android.graphics.Typeface.BOLD)
