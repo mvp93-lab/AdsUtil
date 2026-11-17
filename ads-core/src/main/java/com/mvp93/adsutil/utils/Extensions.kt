@@ -1,8 +1,19 @@
 package com.mvp93.adsutil.utils
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.ApplicationInfo
 import android.widget.Toast
+
+/**
+ * Unwraps a [Context] (e.g., [ContextWrapper]) to find the underlying [Activity], if any.
+ */
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 /**
  * Checks if the application is currently running in debug mode.

@@ -61,4 +61,5 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.coil.compose)
     implementation(libs.google.ump)
+    testImplementation(libs.junit)
 }

@@ -1,8 +1,11 @@
 package com.mvp93.adsutil.ui
 
+import android.view.ViewGroup
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -12,9 +15,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mvp93.adsutil.AdManager
 import com.mvp93.adsutil.utils.AdsConstants
-
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import com.mvp93.adsutil.utils.findActivity
 
 @Composable
 fun BannerAd(
@@ -36,25 +37,31 @@ fun BannerAd(
 
     if (adView == null) return
 
-    // Handle Lifecycle events (only clean up on global destroy if needed, 
-    // or just let it stay cached for persistence)
-    DisposableEffect(lifecycleOwner) {
+    // Destroy cached banner only when the hosting Activity is actually being destroyed
+    // so tab/screen switches can still reuse it without leaking the Activity.
+    DisposableEffect(lifecycleOwner, key) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_DESTROY) {
-                // For cached ads, we might not want to destroy immediately on screen exit
-                // but we forward the event anyway if the activity is dying.
+                val activity = context.findActivity()
+                if (activity == null || activity.isFinishing || activity.isDestroyed) {
+                    AdManager.destroyBanner(key)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            // Note: We don't call adView.destroy() here because we want to reuse it 
-            // from the AdManager cache when the user switches back to this tab.
         }
     }
 
     AndroidView(
         modifier = modifier.fillMaxWidth(),
-        factory = { adView }
+        factory = {
+            (adView.parent as? ViewGroup)?.removeView(adView)
+            adView
+        },
+        onRelease = { view ->
+            (view.parent as? ViewGroup)?.removeView(view)
+        }
     )
 }

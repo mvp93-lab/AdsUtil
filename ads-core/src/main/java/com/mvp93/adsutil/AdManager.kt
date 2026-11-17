@@ -1,6 +1,8 @@
 package com.mvp93.adsutil
 
+import android.app.Activity
 import android.content.Context
+import android.os.Looper
 import android.util.Log
 import com.google.android.libraries.ads.mobile.sdk.MobileAds
 import com.google.android.libraries.ads.mobile.sdk.appopen.AppOpenAd
@@ -11,8 +13,11 @@ import com.google.android.libraries.ads.mobile.sdk.banner.BannerAd
 import com.google.android.libraries.ads.mobile.sdk.banner.BannerAdRequest
 import com.google.android.libraries.ads.mobile.sdk.common.AdLoadCallback
 import com.google.android.libraries.ads.mobile.sdk.common.AdRequest
+import com.google.android.libraries.ads.mobile.sdk.common.FullScreenContentError
 import com.google.android.libraries.ads.mobile.sdk.common.LoadAdError
+import com.google.android.libraries.ads.mobile.sdk.initialization.InitializationConfig
 import com.google.android.libraries.ads.mobile.sdk.interstitial.InterstitialAd
+import com.google.android.libraries.ads.mobile.sdk.interstitial.InterstitialAdEventCallback
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAd
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdLoader
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdLoaderCallback
@@ -20,23 +25,34 @@ import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdRequest
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardItem
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardedAd
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardedAdEventCallback
+import com.google.android.ump.UserMessagingPlatform
+import com.mvp93.adsutil.utils.AdsConstants
+import com.mvp93.adsutil.utils.findActivity
 import com.mvp93.adsutil.utils.isDebug
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 
 object AdManager {
-    private val interstitialCache = mutableMapOf<String, InterstitialAd>()
-    private val bannerCache = mutableMapOf<String, AdView>()
-    private val nativeAdCache = mutableMapOf<String, NativeAd>()
-    private val rewardedCache = mutableMapOf<String, RewardedAd>()
+    private val interstitialCache = ConcurrentHashMap<String, InterstitialAd>()
+    private val bannerCache = ConcurrentHashMap<String, AdView>()
+    private val nativeAdCache = ConcurrentHashMap<String, NativeAd>()
+    private val rewardedCache = ConcurrentHashMap<String, RewardedAd>()
+    @Volatile
     private var appOpenAdCache: AppOpenAd? = null
+
+    private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    private val initMutex = Mutex()
 
     private val _isAdsEnabled = MutableStateFlow(true)
     val isAdsEnabled = _isAdsEnabled.asStateFlow()
@@ -47,8 +63,9 @@ object AdManager {
     fun setAdsEnabled(enabled: Boolean) {
         _isAdsEnabled.value = enabled
         if (!enabled) {
-            // Clear caches if ads are disabled
+            val bannersToDestroy = bannerCache.values.toList()
             bannerCache.clear()
+            destroyAdViewsOnMain(bannersToDestroy)
             nativeAdCache.clear()
             interstitialCache.clear()
             rewardedCache.clear()
@@ -56,93 +73,152 @@ object AdManager {
         }
     }
 
+    private fun destroyAdViewsOnMain(adViews: List<AdView>) {
+        if (adViews.isEmpty()) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            adViews.forEach { it.destroy() }
+        } else {
+            scope.launch {
+                adViews.forEach { it.destroy() }
+            }
+        }
+    }
+
+    fun destroyBanner(key: String) {
+        bannerCache.remove(key)?.let { adView ->
+            destroyAdViewsOnMain(listOf(adView))
+        }
+    }
+
     fun getCachedNativeAd(screenTag: String): NativeAd? = nativeAdCache[screenTag]
 
     suspend fun initialize(context: Context, appId: String) {
         if (_isInitialized.value) return
-        
-        // Final safety check for GDPR
-        val consentInformation = com.google.android.ump.UserMessagingPlatform.getConsentInformation(context)
-        val status = consentInformation.consentStatus
-        val canAds = consentInformation.canRequestAds()
-        
-        Log.d("AdManager", "Initialization attempt. Status: $status, canRequestAds: $canAds")
-        
-        if (!canAds) {
-            Log.e("AdManager", "ABORTING initialization: SDK says we cannot request ads.")
-            return
-        }
-        
-        val finalAppId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.ADS_APP_TEST_ID else appId
-        Log.d("AdManager", "Calling MobileAds.initialize with ID: $finalAppId")
-        try {
-            val config = com.google.android.libraries.ads.mobile.sdk.initialization.InitializationConfig.Builder(finalAppId).build()
-            MobileAds.initialize(context, config)
-            _isInitialized.value = true
-            Log.d("AdManager", "MobileAds Next-Gen initialized successfully")
-        } catch (e: Exception) {
-            Log.e("AdManager", "MobileAds Next-Gen initialization failed", e)
-        }
-    }
 
-    fun getOrCreateBanner(context: Context, key: String, adUnitId: String): AdView? {
-        if (!_isInitialized.value || !_isAdsEnabled.value) return null
+        initMutex.withLock {
+            if (_isInitialized.value) return
 
-        val finalAdUnitId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.AD_BANNER_TEST_ID else adUnitId
-        return bannerCache.getOrPut(key) {
-            Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId")
-            AdView(context).apply {
-                val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, AdSize.BANNER).build()
-                this.loadAd(bannerRequest, object : AdLoadCallback<BannerAd> {
-                    override fun onAdLoaded(ad: BannerAd) {
-                        Log.d("AdManager", "BannerAd ($key) loaded successfully")
-                    }
+            val appContext = context.applicationContext
+            // Final safety check for GDPR
+            val consentInformation = UserMessagingPlatform.getConsentInformation(appContext)
+            val status = consentInformation.consentStatus
+            val canAds = consentInformation.canRequestAds()
 
-                    override fun onAdFailedToLoad(error: LoadAdError) {
-                        Log.e("AdManager", "BannerAd ($key) failed to load: ${error.message}")
-                    }
-                })
+            Log.d("AdManager", "Initialization attempt. Status: $status, canRequestAds: $canAds")
+
+            if (!canAds) {
+                Log.e("AdManager", "ABORTING initialization: SDK says we cannot request ads.")
+                return
+            }
+
+            val finalAppId = if (appContext.isDebug()) AdsConstants.ADS_APP_TEST_ID else appId
+            Log.d("AdManager", "Calling MobileAds.initialize with ID: $finalAppId")
+            try {
+                val config = InitializationConfig.Builder(finalAppId).build()
+                MobileAds.initialize(appContext, config)
+                _isInitialized.value = true
+                Log.d("AdManager", "MobileAds Next-Gen initialized successfully")
+            } catch (e: Exception) {
+                Log.e("AdManager", "MobileAds Next-Gen initialization failed", e)
             }
         }
     }
 
-    suspend fun loadInterstitial(
-        context: Context, 
-        adUnitId: String
-    ): Boolean {
-        Log.d("AdManager", "loadInterstitial called for: $adUnitId")
+    private suspend fun awaitInitialization(): Boolean {
         if (!_isInitialized.value) {
-            Log.d("AdManager", "Waiting for MobileAds initialization before loading interstitial...")
             withTimeoutOrNull(5000L) {
                 _isInitialized.first { it }
             }
         }
-        
-        if (!_isInitialized.value) {
-            Log.e("AdManager", "Aborting load: AdManager is not initialized.")
+        return _isInitialized.value
+    }
+
+    private suspend fun canLoadAd(tag: String): Boolean {
+        if (!awaitInitialization()) {
+            Log.e("AdManager", "Aborting $tag load: AdManager is not initialized.")
             return false
         }
-
         if (!_isAdsEnabled.value) {
-            Log.d("AdManager", "Aborting load: Ads are disabled.")
+            Log.d("AdManager", "Aborting $tag load: Ads are disabled.")
             return false
         }
+        return true
+    }
 
-        val finalAdUnitId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.AD_INTERSTITIAL_TEST_ID else adUnitId
+    private fun invokeOnUiThread(activity: Activity?, callback: (() -> Unit)?) {
+        if (callback == null) return
+        if (activity != null && !activity.isDestroyed) {
+            activity.runOnUiThread { callback() }
+        } else {
+            callback()
+        }
+    }
+
+    private fun Activity.isUsableForAd(): Boolean = !isFinishing && !isDestroyed
+
+    fun getOrCreateBanner(context: Context, key: String, adUnitId: String): AdView? {
+        if (!_isInitialized.value || !_isAdsEnabled.value) return null
+
+        val currentActivity = context.findActivity()
+        bannerCache[key]?.let { cached ->
+            val cachedActivity = cached.context.findActivity()
+            val isStale = cachedActivity == null ||
+                !cachedActivity.isUsableForAd() ||
+                (currentActivity != null && cachedActivity !== currentActivity)
+            if (!isStale) {
+                return cached
+            }
+            if (bannerCache.remove(key, cached)) {
+                destroyAdViewsOnMain(listOf(cached))
+            }
+        }
+
+        val finalAdUnitId = if (context.isDebug()) AdsConstants.AD_BANNER_TEST_ID else adUnitId
+        Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId")
+        val newAdView = AdView(context).apply {
+            val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, AdSize.BANNER).build()
+            this.loadAd(bannerRequest, object : AdLoadCallback<BannerAd> {
+                override fun onAdLoaded(ad: BannerAd) {
+                    Log.d("AdManager", "BannerAd ($key) loaded successfully")
+                }
+
+                override fun onAdFailedToLoad(adError: LoadAdError) {
+                    Log.e("AdManager", "BannerAd ($key) failed to load: ${adError.message}")
+                    bannerCache.remove(key, this@apply)
+                }
+            })
+        }
+        val existing = bannerCache.putIfAbsent(key, newAdView)
+        if (existing != null) {
+            newAdView.destroy()
+            return existing
+        }
+        return newAdView
+    }
+
+    suspend fun loadInterstitial(
+        context: Context,
+        adUnitId: String
+    ): Boolean {
+        Log.d("AdManager", "loadInterstitial called for: $adUnitId")
+        if (!canLoadAd("interstitial")) return false
+
+        val appContext = context.applicationContext
+        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.AD_INTERSTITIAL_TEST_ID else adUnitId
         val request = AdRequest.Builder(finalAdUnitId).build()
-        
+
         return suspendCancellableCoroutine { continuation ->
             InterstitialAd.load(request, object : AdLoadCallback<InterstitialAd> {
                 override fun onAdLoaded(ad: InterstitialAd) {
                     interstitialCache[adUnitId] = ad
                     Log.d("AdManager", "Interstitial loaded for ID: $adUnitId")
-                    if (continuation.isActive) continuation.resume(true, null)
+                    if (continuation.isActive) continuation.resume(true)
                 }
 
-                override fun onAdFailedToLoad(error: LoadAdError) {
+                override fun onAdFailedToLoad(adError: LoadAdError) {
                     interstitialCache.remove(adUnitId)
-                    Log.e("AdManager", "Interstitial failed to load for ID $adUnitId: ${error.message}")
-                    if (continuation.isActive) continuation.resume(false, null)
+                    Log.e("AdManager", "Interstitial failed to load for ID $adUnitId: ${adError.message}")
+                    if (continuation.isActive) continuation.resume(false)
                 }
             })
         }
@@ -154,45 +230,49 @@ object AdManager {
         reloadAfterShow: Boolean = true,
         onAdClosed: (() -> Unit)? = null
     ) {
-        val safeOnAdClosed = {
-            (context as? android.app.Activity)?.runOnUiThread {
-                onAdClosed?.invoke()
-            } ?: onAdClosed?.invoke()
-        }
-
+        val activity = context.findActivity()
         if (!_isAdsEnabled.value) {
-            safeOnAdClosed()
+            invokeOnUiThread(activity, onAdClosed)
             return
         }
+
         val ad = interstitialCache[adUnitId]
-        if (ad != null) {
-            ad.adEventCallback = object : com.google.android.libraries.ads.mobile.sdk.interstitial.InterstitialAdEventCallback {
-                override fun onAdDismissedFullScreenContent() {
-                    Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
-                    interstitialCache.remove(adUnitId)
-                    if (reloadAfterShow) {
-                        CoroutineScope(Dispatchers.Main).launch {
-                            loadInterstitial(context, adUnitId)
-                        }
-                    }
-                    safeOnAdClosed()
-                }
-
-                override fun onAdFailedToShowFullScreenContent(error: com.google.android.libraries.ads.mobile.sdk.common.FullScreenContentError) {
-                    Log.e("AdManager", "Interstitial failed to show: ${error.message}")
-                    interstitialCache.remove(adUnitId)
-                    safeOnAdClosed()
-                }
-
-                override fun onAppEvent(name: String, data: String?) {
-                    Log.d("AdManager", "App event: $name, $data")
-                }
-            }
-            ad.show(context as android.app.Activity)
-        } else {
+        if (ad == null) {
             Log.e("AdManager", "Interstitial not ready for ID: $adUnitId")
-            safeOnAdClosed()
+            invokeOnUiThread(activity, onAdClosed)
+            return
         }
+
+        if (activity == null || !activity.isUsableForAd()) {
+            Log.e("AdManager", "Cannot show Interstitial: valid Activity not found or already destroyed")
+            invokeOnUiThread(activity, onAdClosed)
+            return
+        }
+
+        val appContext = context.applicationContext
+        ad.adEventCallback = object : InterstitialAdEventCallback {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
+                interstitialCache.remove(adUnitId)
+                if (reloadAfterShow) {
+                    scope.launch {
+                        loadInterstitial(appContext, adUnitId)
+                    }
+                }
+                invokeOnUiThread(activity, onAdClosed)
+            }
+
+            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                Log.e("AdManager", "Interstitial failed to show: ${fullScreenContentError.message}")
+                interstitialCache.remove(adUnitId)
+                invokeOnUiThread(activity, onAdClosed)
+            }
+
+            override fun onAppEvent(name: String, data: String?) {
+                Log.d("AdManager", "App event: $name, $data")
+            }
+        }
+        ad.show(activity)
     }
 
     suspend fun loadNativeAd(
@@ -202,11 +282,7 @@ object AdManager {
         onAdLoaded: (NativeAd) -> Unit,
         onAdFailed: (LoadAdError) -> Unit
     ) {
-        if (!_isInitialized.value) {
-            withTimeoutOrNull(5000L) { _isInitialized.first { it } }
-        }
-        
-        if (!_isInitialized.value) {
+        if (!awaitInitialization()) {
             onAdFailed(LoadAdError(LoadAdError.ErrorCode.INTERNAL_ERROR, "SDK not initialized"))
             return
         }
@@ -222,7 +298,8 @@ object AdManager {
             return
         }
 
-        val finalAdUnitId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.AD_NATIVE_TEST_ID else adUnitId
+        val appContext = context.applicationContext
+        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.AD_NATIVE_TEST_ID else adUnitId
         val request = NativeAdRequest.Builder(finalAdUnitId, listOf(NativeAd.NativeAdType.NATIVE)).build()
         NativeAdLoader.load(request, object : NativeAdLoaderCallback {
             override fun onNativeAdLoaded(nativeAd: NativeAd) {
@@ -230,8 +307,8 @@ object AdManager {
                 onAdLoaded(nativeAd)
             }
 
-            override fun onAdFailedToLoad(error: LoadAdError) {
-                onAdFailed(error)
+            override fun onAdFailedToLoad(adError: LoadAdError) {
+                onAdFailed(adError)
             }
         })
     }
@@ -240,63 +317,53 @@ object AdManager {
         context: Context,
         adUnitId: String
     ): Boolean {
-        if (!_isInitialized.value) {
-            Log.d("AdManager", "Waiting for MobileAds initialization...")
-            // Wait for initialization with timeout
-            withTimeoutOrNull(5000L) {
-                _isInitialized.first { it }
-            }
-        }
+        if (!canLoadAd("appOpen")) return false
 
-        if (!_isInitialized.value || !_isAdsEnabled.value) {
-            return false
-        }
-
-        val finalAdUnitId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.ADS_OPEN_APP_TEST_ID else adUnitId
+        val appContext = context.applicationContext
+        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.ADS_OPEN_APP_TEST_ID else adUnitId
         val request = AdRequest.Builder(finalAdUnitId).build()
-        
+
         return suspendCancellableCoroutine { continuation ->
             AppOpenAd.load(request, object : AdLoadCallback<AppOpenAd> {
                 override fun onAdLoaded(ad: AppOpenAd) {
                     appOpenAdCache = ad
                     Log.d("AdManager", "AppOpenAd loaded successfully")
-                    if (continuation.isActive) continuation.resume(true, null)
+                    if (continuation.isActive) continuation.resume(true)
                 }
 
-                override fun onAdFailedToLoad(error: LoadAdError) {
+                override fun onAdFailedToLoad(adError: LoadAdError) {
                     appOpenAdCache = null
-                    Log.e("AdManager", "AppOpenAd failed to load: ${error.message}")
-                    if (continuation.isActive) continuation.resume(false, null)
+                    Log.e("AdManager", "AppOpenAd failed to load: ${adError.message}")
+                    if (continuation.isActive) continuation.resume(false)
                 }
             })
         }
     }
 
     fun showAppOpenAd(
-        activity: android.app.Activity,
+        activity: Activity,
         onAdDismissed: (() -> Unit)? = null
     ) {
-        if (!_isAdsEnabled.value || appOpenAdCache == null) {
-            onAdDismissed?.invoke()
+        val ad = appOpenAdCache
+        if (!_isAdsEnabled.value || ad == null || !activity.isUsableForAd()) {
+            invokeOnUiThread(activity, onAdDismissed)
             return
         }
 
-        appOpenAdCache?.let { ad ->
-            ad.adEventCallback = object : AppOpenAdEventCallback {
-                override fun onAdDismissedFullScreenContent() {
-                    Log.d("AdManager", "AppOpenAd dismissed")
-                    appOpenAdCache = null
-                    onAdDismissed?.invoke()
-                }
-
-                override fun onAdFailedToShowFullScreenContent(error: com.google.android.libraries.ads.mobile.sdk.common.FullScreenContentError) {
-                    Log.e("AdManager", "AppOpenAd failed to show: ${error.message}")
-                    appOpenAdCache = null
-                    onAdDismissed?.invoke()
-                }
+        ad.adEventCallback = object : AppOpenAdEventCallback {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d("AdManager", "AppOpenAd dismissed")
+                appOpenAdCache = null
+                invokeOnUiThread(activity, onAdDismissed)
             }
-            ad.show(activity)
+
+            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                Log.e("AdManager", "AppOpenAd failed to show: ${fullScreenContentError.message}")
+                appOpenAdCache = null
+                invokeOnUiThread(activity, onAdDismissed)
+            }
         }
+        ad.show(activity)
     }
 
     fun isAppOpenAdAvailable(): Boolean = appOpenAdCache != null
@@ -308,24 +375,10 @@ object AdManager {
         adUnitId: String
     ): Boolean {
         Log.d("AdManager", "loadRewarded called for: $adUnitId")
-        if (!_isInitialized.value) {
-            Log.d("AdManager", "Waiting for MobileAds initialization before loading rewarded...")
-            withTimeoutOrNull(5000L) {
-                _isInitialized.first { it }
-            }
-        }
+        if (!canLoadAd("rewarded")) return false
 
-        if (!_isInitialized.value) {
-            Log.e("AdManager", "Aborting load: AdManager is not initialized.")
-            return false
-        }
-
-        if (!_isAdsEnabled.value) {
-            Log.d("AdManager", "Aborting load: Ads are disabled.")
-            return false
-        }
-
-        val finalAdUnitId = if (context.isDebug()) com.mvp93.adsutil.utils.AdsConstants.AD_REWARDED_TEST_ID else adUnitId
+        val appContext = context.applicationContext
+        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.AD_REWARDED_TEST_ID else adUnitId
         val request = AdRequest.Builder(finalAdUnitId).build()
 
         return suspendCancellableCoroutine { continuation ->
@@ -333,13 +386,13 @@ object AdManager {
                 override fun onAdLoaded(ad: RewardedAd) {
                     rewardedCache[adUnitId] = ad
                     Log.d("AdManager", "Rewarded ad loaded for ID: $adUnitId")
-                    if (continuation.isActive) continuation.resume(true, null)
+                    if (continuation.isActive) continuation.resume(true)
                 }
 
-                override fun onAdFailedToLoad(error: LoadAdError) {
+                override fun onAdFailedToLoad(adError: LoadAdError) {
                     rewardedCache.remove(adUnitId)
-                    Log.e("AdManager", "Rewarded ad failed to load for ID $adUnitId: ${error.message}")
-                    if (continuation.isActive) continuation.resume(false, null)
+                    Log.e("AdManager", "Rewarded ad failed to load for ID $adUnitId: ${adError.message}")
+                    if (continuation.isActive) continuation.resume(false)
                 }
             })
         }
@@ -352,53 +405,50 @@ object AdManager {
         onUserEarnedReward: (RewardItem) -> Unit,
         onAdClosed: (() -> Unit)? = null
     ) {
-        val safeOnAdClosed = {
-            (context as? android.app.Activity)?.runOnUiThread {
-                onAdClosed?.invoke()
-            } ?: onAdClosed?.invoke()
-        }
-
+        val activity = context.findActivity()
         if (!_isAdsEnabled.value) {
-            safeOnAdClosed()
+            invokeOnUiThread(activity, onAdClosed)
             return
         }
 
         val ad = rewardedCache[adUnitId]
-        if (ad != null) {
-            ad.adEventCallback = object : RewardedAdEventCallback {
-                override fun onAdDismissedFullScreenContent() {
-                    Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
-                    rewardedCache.remove(adUnitId)
-                    if (reloadAfterShow) {
-                        CoroutineScope(Dispatchers.Main).launch {
-                            loadRewarded(context, adUnitId)
-                        }
-                    }
-                    safeOnAdClosed()
-                }
-
-                override fun onAdFailedToShowFullScreenContent(error: com.google.android.libraries.ads.mobile.sdk.common.FullScreenContentError) {
-                    Log.e("AdManager", "Rewarded ad failed to show: ${error.message}")
-                    rewardedCache.remove(adUnitId)
-                    safeOnAdClosed()
-                }
-            }
-
-            val activity = context as? android.app.Activity
-            if (activity != null) {
-                ad.show(activity) { rewardItem ->
-                    Log.d("AdManager", "User earned reward: ${rewardItem.amount} ${rewardItem.type}")
-                    activity.runOnUiThread {
-                        onUserEarnedReward(rewardItem)
-                    }
-                }
-            } else {
-                Log.e("AdManager", "Context is not an Activity, cannot show Rewarded Ad")
-                safeOnAdClosed()
-            }
-        } else {
+        if (ad == null) {
             Log.e("AdManager", "Rewarded ad not ready for ID: $adUnitId")
-            safeOnAdClosed()
+            invokeOnUiThread(activity, onAdClosed)
+            return
+        }
+
+        if (activity == null || !activity.isUsableForAd()) {
+            Log.e("AdManager", "Cannot show Rewarded Ad: valid Activity not found or already destroyed")
+            invokeOnUiThread(activity, onAdClosed)
+            return
+        }
+
+        val appContext = context.applicationContext
+        ad.adEventCallback = object : RewardedAdEventCallback {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
+                rewardedCache.remove(adUnitId)
+                if (reloadAfterShow) {
+                    scope.launch {
+                        loadRewarded(appContext, adUnitId)
+                    }
+                }
+                invokeOnUiThread(activity, onAdClosed)
+            }
+
+            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                Log.e("AdManager", "Rewarded ad failed to show: ${fullScreenContentError.message}")
+                rewardedCache.remove(adUnitId)
+                invokeOnUiThread(activity, onAdClosed)
+            }
+        }
+
+        ad.show(activity) { rewardItem ->
+            Log.d("AdManager", "User earned reward: ${rewardItem.amount} ${rewardItem.type}")
+            activity.runOnUiThread {
+                onUserEarnedReward(rewardItem)
+            }
         }
     }
 }

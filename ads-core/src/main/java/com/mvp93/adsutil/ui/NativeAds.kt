@@ -1,5 +1,6 @@
 package com.mvp93.adsutil.ui
 
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -21,9 +22,90 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.load
 import coil.transform.RoundedCornersTransformation
 import com.google.android.libraries.ads.mobile.sdk.nativead.MediaView
+import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAd
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdView
 import com.mvp93.adsutil.AdManager
 import com.mvp93.adsutil.utils.AdsConstants
+
+private class NativeAdState(
+    val nativeAd: NativeAd?,
+    val isLoading: Boolean
+)
+
+@Composable
+private fun rememberNativeAdState(
+    adUnitId: String,
+    screenTag: String,
+    isInitialized: Boolean
+): NativeAdState {
+    val context = LocalContext.current
+    var nativeAd by remember(screenTag) { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
+    var isLoading by remember(screenTag) { mutableStateOf(nativeAd == null) }
+
+    LaunchedEffect(adUnitId, screenTag, isInitialized) {
+        if (!isInitialized) return@LaunchedEffect
+        val cached = AdManager.getCachedNativeAd(screenTag)
+        if (cached != null) {
+            nativeAd = cached
+            isLoading = false
+            return@LaunchedEffect
+        }
+        isLoading = true
+        AdManager.loadNativeAd(
+            context = context,
+            adUnitId = adUnitId,
+            screenTag = screenTag,
+            onAdLoaded = {
+                nativeAd = it
+                isLoading = false
+            },
+            onAdFailed = {
+                isLoading = false
+            }
+        )
+    }
+
+    return NativeAdState(nativeAd = nativeAd, isLoading = isLoading)
+}
+
+private fun bindNativeAdIfNeeded(
+    adView: NativeAdView,
+    ad: NativeAd,
+    defaultCta: String,
+    iconCornerRadius: Float,
+    mediaView: MediaView?
+) {
+    // Avoid re-registering and reloading assets on unrelated Compose recompositions.
+    if (adView.tag === ad) return
+    adView.tag = ad
+
+    (adView.headlineView as? TextView)?.text = ad.headline ?: "Sponsored"
+    (adView.bodyView as? TextView)?.apply {
+        val bodyText = ad.body
+        if (bodyText.isNullOrBlank()) {
+            visibility = View.GONE
+        } else {
+            visibility = View.VISIBLE
+            text = bodyText
+        }
+    }
+    (adView.callToActionView as? TextView)?.text = ad.callToAction ?: defaultCta
+
+    (adView.iconView as? ImageView)?.apply {
+        val iconAsset = ad.icon
+        if (iconAsset != null) {
+            visibility = View.VISIBLE
+            load(iconAsset.uri) {
+                transformations(RoundedCornersTransformation(iconCornerRadius))
+            }
+        } else {
+            setImageDrawable(null)
+            visibility = View.GONE
+        }
+    }
+
+    adView.registerNativeAd(ad, mediaView)
+}
 
 @Composable
 fun ShimmerLoading(
@@ -68,35 +150,21 @@ fun SmallNativeAd(
     adUnitId: String = AdsConstants.AD_NATIVE_TEST_ID,
     screenTag: String = "default"
 ) {
-    val context = LocalContext.current
     val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
     val isInitialized by AdManager.isInitialized.collectAsState()
-    
+
     if (!isAdsEnabled) return
 
-    var nativeAd by remember { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
-    var isLoading by remember { mutableStateOf(nativeAd == null) }
+    val adState = rememberNativeAdState(
+        adUnitId = adUnitId,
+        screenTag = screenTag,
+        isInitialized = isInitialized
+    )
 
-    LaunchedEffect(adUnitId, screenTag, isInitialized) {
-        if (!isInitialized) return@LaunchedEffect
-        AdManager.loadNativeAd(
-            context = context,
-            adUnitId = adUnitId,
-            screenTag = screenTag,
-            onAdLoaded = { 
-                nativeAd = it
-                isLoading = false
-            },
-            onAdFailed = {
-                isLoading = false
-            }
-        )
-    }
-
-    if (isLoading) {
+    if (adState.isLoading) {
         ShimmerLoading(modifier = modifier, height = 80.dp)
-    } else if (nativeAd != null) {
-        val ad = nativeAd!!
+    } else {
+        val ad = adState.nativeAd ?: return
         AndroidView(
             modifier = modifier
                 .fillMaxWidth()
@@ -209,18 +277,13 @@ fun SmallNativeAd(
                 }
             },
             update = { view ->
-                val adView = view as NativeAdView
-                (adView.headlineView as? TextView)?.text = ad.headline ?: "Sponsored"
-                (adView.bodyView as? TextView)?.text = ad.body
-                (adView.callToActionView as? TextView)?.text = ad.callToAction ?: "OPEN"
-                
-                ad.icon?.let {
-                    (adView.iconView as? ImageView)?.load(it.uri) {
-                        transformations(RoundedCornersTransformation(24f))
-                    }
-                }
-
-                adView.registerNativeAd(ad, null)
+                bindNativeAdIfNeeded(
+                    adView = view as NativeAdView,
+                    ad = ad,
+                    defaultCta = "OPEN",
+                    iconCornerRadius = 24f,
+                    mediaView = null
+                )
             }
         )
     }
@@ -232,35 +295,21 @@ fun BigNativeAd(
     adUnitId: String = AdsConstants.AD_NATIVE_TEST_ID,
     screenTag: String = "default"
 ) {
-    val context = LocalContext.current
     val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
     val isInitialized by AdManager.isInitialized.collectAsState()
 
     if (!isAdsEnabled) return
 
-    var nativeAd by remember { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
-    var isLoading by remember { mutableStateOf(nativeAd == null) }
+    val adState = rememberNativeAdState(
+        adUnitId = adUnitId,
+        screenTag = screenTag,
+        isInitialized = isInitialized
+    )
 
-    LaunchedEffect(adUnitId, screenTag, isInitialized) {
-        if (!isInitialized) return@LaunchedEffect
-        AdManager.loadNativeAd(
-            context = context,
-            adUnitId = adUnitId,
-            screenTag = screenTag,
-            onAdLoaded = { 
-                nativeAd = it
-                isLoading = false
-            },
-            onAdFailed = {
-                isLoading = false
-            }
-        )
-    }
-
-    if (isLoading) {
+    if (adState.isLoading) {
         ShimmerLoading(modifier = modifier, height = 250.dp)
-    } else if (nativeAd != null) {
-        val ad = nativeAd!!
+    } else {
+        val ad = adState.nativeAd ?: return
         AndroidView(
             modifier = modifier
                 .fillMaxWidth()
@@ -400,18 +449,14 @@ fun BigNativeAd(
             },
             update = { view ->
                 val adView = view as NativeAdView
-                (adView.headlineView as? TextView)?.text = ad.headline ?: "Sponsored"
-                (adView.bodyView as? TextView)?.text = ad.body
-                (adView.callToActionView as? TextView)?.text = ad.callToAction ?: "LEARN MORE"
-                
-                ad.icon?.let {
-                    (adView.iconView as? ImageView)?.load(it.uri) {
-                        transformations(RoundedCornersTransformation(50f))
-                    }
-                }
-
                 val mediaView = adView.findViewWithTag<MediaView>("media_view")
-                adView.registerNativeAd(ad, mediaView)
+                bindNativeAdIfNeeded(
+                    adView = adView,
+                    ad = ad,
+                    defaultCta = "LEARN MORE",
+                    iconCornerRadius = 50f,
+                    mediaView = mediaView
+                )
             }
         )
     }

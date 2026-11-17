@@ -4,35 +4,37 @@ import android.app.Activity
 import android.content.Context
 import android.util.Log
 import com.google.android.ump.ConsentDebugSettings
-import com.google.android.ump.ConsentForm
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
 import com.mvp93.adsutil.utils.isDebug
-import java.util.concurrent.atomic.AtomicBoolean
 
 class ConsentManager(private val activity: Activity) {
     private val consentInformation: ConsentInformation = UserMessagingPlatform.getConsentInformation(activity)
-    private val isMobileAdsInitializeCalled = AtomicBoolean(false)
 
     interface OnConsentCheckListener {
         fun onConsentCheckCompleted()
         fun onConsentFormError(error: String)
     }
 
+    @JvmOverloads
     fun requestConsentInfoUpdate(
-        onConsentCheckListener: OnConsentCheckListener
+        onConsentCheckListener: OnConsentCheckListener,
+        testDeviceHashedIds: List<String> = DEFAULT_TEST_DEVICE_IDS,
+        resetConsentInDebug: Boolean = true
     ) {
-        if (activity.isDebug()) {
+        if (activity.isDebug() && resetConsentInDebug) {
             // Reset consent state for testing purposes in debug builds
             // This ensures the dialog shows up every time you test
-            consentInformation.reset() 
+            consentInformation.reset()
         }
 
         val debugSettings = if (activity.isDebug()) {
             ConsentDebugSettings.Builder(activity)
                 .setDebugGeography(ConsentDebugSettings.DebugGeography.DEBUG_GEOGRAPHY_EEA)
-                .addTestDeviceHashedId("C6F069CF4A4DC8F0272DA62232522711")
+                .apply {
+                    testDeviceHashedIds.forEach { addTestDeviceHashedId(it) }
+                }
                 .build()
         } else {
             null
@@ -67,7 +69,7 @@ class ConsentManager(private val activity: Activity) {
             { requestError ->
                 Log.e("ConsentManager", "Consent request error: [${requestError.errorCode}] ${requestError.message}")
                 onConsentCheckListener.onConsentFormError(requestError.message)
-                
+
                 // Even on error, if we can request ads (e.g. from previous session), we should
                 if (canRequestAds) {
                     onConsentCheckListener.onConsentCheckCompleted()
@@ -107,5 +109,9 @@ class ConsentManager(private val activity: Activity) {
         
         // If the string starts with '1', it means Purpose 1 (Device Access) is granted.
         return purposeConsents.startsWith("1")
+    }
+
+    companion object {
+        val DEFAULT_TEST_DEVICE_IDS = listOf("C6F069CF4A4DC8F0272DA62232522711")
     }
 }

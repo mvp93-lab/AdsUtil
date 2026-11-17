@@ -7,10 +7,10 @@ import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-
 import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -18,10 +18,11 @@ import kotlinx.coroutines.launch
  */
 class AppOpenManager(private val application: Application) : DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
 
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var currentActivity: Activity? = null
     private var adUnitId: String = ""
+    private var isLoadingAd: Boolean = false
 
     init {
         application.registerActivityLifecycleCallbacks(this)
@@ -30,13 +31,20 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
 
     fun setAdUnitId(id: String) {
         this.adUnitId = id
-        // Preload if possible
-        if (adUnitId.isNotEmpty()) {
-            scope.launch {
+        preloadAd("App Open Ad Preloaded")
+    }
+
+    private fun preloadAd(debugToastMessage: String) {
+        if (adUnitId.isEmpty() || isLoadingAd || !AdManager.isAdsEnabled.value) return
+        isLoadingAd = true
+        scope.launch {
+            try {
                 val loaded = AdManager.loadAppOpenAd(application, adUnitId)
                 if (loaded) {
-                    application.showDebugToast("App Open Ad Preloaded")
+                    application.showDebugToast(debugToastMessage)
                 }
+            } finally {
+                isLoadingAd = false
             }
         }
     }
@@ -45,32 +53,19 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
      * Shows the app open ad if one is available and the app is in the foreground.
      */
     private fun showAdIfAvailable() {
-        if (!AdManager.isAdsEnabled.value) return
+        if (!AdManager.isAdsEnabled.value || adUnitId.isEmpty()) return
 
-        currentActivity?.let { activity ->
-            // Don't show if we are on SplashActivity or similar if you want
-            // if (activity is SplashActivity) return
+        val activity = currentActivity ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
 
-            if (AdManager.isAppOpenAdAvailable()) {
-                Log.d("AppOpenManager", "Showing App Open Ad")
-                AdManager.showAppOpenAd(activity) {
-                    // Reload for next time
-                    scope.launch {
-                        val loaded = AdManager.loadAppOpenAd(application, adUnitId)
-                        if (loaded) {
-                            application.showDebugToast("App Open Ad Reloaded")
-                        }
-                    }
-                }
-            } else {
-                Log.d("AppOpenManager", "App Open Ad not available, loading one...")
-                scope.launch {
-                    val loaded = AdManager.loadAppOpenAd(application, adUnitId)
-                    if (loaded) {
-                        application.showDebugToast("App Open Ad Loaded")
-                    }
-                }
+        if (AdManager.isAppOpenAdAvailable()) {
+            Log.d("AppOpenManager", "Showing App Open Ad")
+            AdManager.showAppOpenAd(activity) {
+                preloadAd("App Open Ad Reloaded")
             }
+        } else {
+            Log.d("AppOpenManager", "App Open Ad not available, loading one...")
+            preloadAd("App Open Ad Loaded")
         }
     }
 
