@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.os.Looper
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import com.google.android.libraries.ads.mobile.sdk.MobileAds
 import com.google.android.libraries.ads.mobile.sdk.appopen.AppOpenAd
 import com.google.android.libraries.ads.mobile.sdk.appopen.AppOpenAdEventCallback
@@ -48,6 +51,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
@@ -700,22 +704,60 @@ object AdManager {
             .setPresentationScope(presentationScope)
             .build()
 
+        val activityRef = WeakReference(activity)
+        var lifecycleObserver: LifecycleEventObserver? = null
+        val lifecycleOwner = if (presentationScope == PictureInPictureAdPresentationScope.SCREEN) {
+            activity as? LifecycleOwner
+        } else {
+            null
+        }
+
+        fun detachLifecycleObserver() {
+            val observer = lifecycleObserver ?: return
+            lifecycleObserver = null
+            lifecycleOwner?.let { owner ->
+                runOnMain { owner.lifecycle.removeObserver(observer) }
+            }
+        }
+
+        if (lifecycleOwner != null) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_DESTROY) {
+                    val host = activityRef.get()
+                    if (host == null || host.isFinishing || host.isDestroyed) {
+                        detachLifecycleObserver()
+                        if (pipCache.remove(adUnitId, ad)) {
+                            destroyPipAdsOnMain(listOf(ad))
+                        }
+                    }
+                }
+            }
+            lifecycleObserver = observer
+            runOnMain { lifecycleOwner.lifecycle.addObserver(observer) }
+        }
+
         ad.adEventCallback = object : PictureInPictureAdEventCallback {
             override fun onAdShown() {
                 Log.d("AdManager", "PictureInPictureAd shown for ID: $adUnitId")
-                invokeOnUiThread(activity, onAdShown)
+                invokeOnUiThread(activityRef.get(), onAdShown)
             }
 
             override fun onAdHidden() {
                 Log.d("AdManager", "PictureInPictureAd hidden for ID: $adUnitId")
-                invokeOnUiThread(activity, onAdHidden)
+                val callback = onAdHidden
+                ad.adEventCallback = null
+                detachLifecycleObserver()
+                invokeOnUiThread(activityRef.get(), callback)
             }
 
             override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                 Log.e("AdManager", "PictureInPictureAd failed to show: ${fullScreenContentError.message}")
+                val callback = onAdFailedToShow
+                ad.adEventCallback = null
+                detachLifecycleObserver()
                 pipCache.remove(adUnitId, ad)
                 destroyPipAdsOnMain(listOf(ad))
-                invokeOnUiThread(activity) { onAdFailedToShow?.invoke(fullScreenContentError) }
+                invokeOnUiThread(activityRef.get()) { callback?.invoke(fullScreenContentError) }
             }
         }
         ad.show(activity, options)
