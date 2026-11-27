@@ -85,6 +85,7 @@ object AdManager {
     private val rewardedLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val pipCache = ConcurrentHashMap<String, PictureInPictureAd>()
     private val pipLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val pipObservers = ConcurrentHashMap<String, Pair<WeakReference<LifecycleOwner>, LifecycleEventObserver>>()
     private val appOpenAdCache = AtomicReference<CachedAppOpenAd?>(null)
     private val appOpenLoadMutex = Mutex()
     internal var clockMs: () -> Long = System::currentTimeMillis
@@ -106,6 +107,7 @@ object AdManager {
             destroyAdViewsOnMain(bannersToDestroy)
             val pipsToDestroy = pipCache.values.toList()
             pipCache.clear()
+            pipObservers.keys.toList().forEach { detachPipObserver(it) }
             destroyPipAdsOnMain(pipsToDestroy)
             nativeAdCache.clear()
             interstitialCache.clear()
@@ -128,10 +130,19 @@ object AdManager {
         runOnMain { adViews.forEach { it.destroy() } }
     }
 
+    private fun detachPipObserver(adUnitId: String) {
+        pipObservers.remove(adUnitId)?.let { (ownerRef, observer) ->
+            ownerRef.get()?.let { owner ->
+                runOnMain { owner.lifecycle.removeObserver(observer) }
+            }
+        }
+    }
+
     private fun destroyPipAdsOnMain(pipAds: List<PictureInPictureAd>) {
         if (pipAds.isEmpty()) return
         runOnMain {
             pipAds.forEach {
+                it.adEventCallback = null
                 it.hide()
                 it.destroy()
             }
@@ -146,7 +157,7 @@ object AdManager {
 
     fun getCachedNativeAd(screenTag: String): NativeAd? = nativeAdCache[screenTag]?.ad
 
-    internal fun getCachedNativeAd(screenTag: String, adUnitId: String): NativeAd? =
+    fun getCachedNativeAd(screenTag: String, adUnitId: String): NativeAd? =
         nativeAdCache[screenTag]?.takeIf { it.requestedAdUnitId == adUnitId }?.ad
 
     suspend fun initialize(context: Context, appId: String) {
@@ -371,22 +382,23 @@ object AdManager {
             return
         }
 
-        val cachedAd = interstitialCache.remove(adUnitId)
-        val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollInterstitialIfActive(adUnitId) else null
-        val ad = cachedAd ?: preloadedAd
-        if (ad == null) {
-            Log.e("AdManager", "Interstitial not ready for ID: $adUnitId")
-            invokeOnUiThread(activity, onAdClosed)
-            return
-        }
-
         val appContext = context.applicationContext
-        val shouldReloadManually = reloadAfterShow && preloadedAd == null
         runOnMain {
-            if (!activity.isUsableForAd()) {
+            if (!_isAdsEnabled.value || !activity.isUsableForAd()) {
                 invokeOnUiThread(activity, onAdClosed)
                 return@runOnMain
             }
+
+            val cachedAd = interstitialCache.remove(adUnitId)
+            val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollInterstitialIfActive(adUnitId) else null
+            val ad = cachedAd ?: preloadedAd
+            if (ad == null) {
+                Log.e("AdManager", "Interstitial not ready for ID: $adUnitId")
+                invokeOnUiThread(activity, onAdClosed)
+                return@runOnMain
+            }
+
+            val shouldReloadManually = reloadAfterShow && preloadedAd == null
             ad.adEventCallback = object : InterstitialAdEventCallback {
                 override fun onAdDismissedFullScreenContent() {
                     Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
@@ -475,7 +487,9 @@ object AdManager {
     private fun getValidAppOpenAd(): AppOpenAd? {
         val cached = appOpenAdCache.get() ?: return null
         if (!isAppOpenAdValid(cached.loadedAtMs)) {
-            appOpenAdCache.compareAndSet(cached, null)
+            if (appOpenAdCache.compareAndSet(cached, null)) {
+                runOnMain { cached.ad.destroy() }
+            }
             Log.d("AdManager", "Cached AppOpenAd expired, discarding")
             return null
         }
@@ -487,6 +501,7 @@ object AdManager {
             val cached = appOpenAdCache.get() ?: return null
             if (appOpenAdCache.compareAndSet(cached, null)) {
                 if (!isAppOpenAdValid(cached.loadedAtMs)) {
+                    runOnMain { cached.ad.destroy() }
                     Log.d("AdManager", "Cached AppOpenAd expired, discarding")
                     return null
                 }
@@ -561,13 +576,13 @@ object AdManager {
             invokeOnUiThread(activity) { onFinished(false) }
             return
         }
-        val ad = takeValidAppOpenAd() ?: adUnitId?.let { AdPreloaderManager.pollAppOpenIfActive(it) }
-        if (ad == null) {
-            invokeOnUiThread(activity) { onFinished(false) }
-            return
-        }
         runOnMain {
-            if (!activity.isUsableForAd()) {
+            if (!_isAdsEnabled.value || !activity.isUsableForAd()) {
+                invokeOnUiThread(activity) { onFinished(false) }
+                return@runOnMain
+            }
+            val ad = takeValidAppOpenAd() ?: adUnitId?.let { AdPreloaderManager.pollAppOpenIfActive(it) }
+            if (ad == null) {
                 invokeOnUiThread(activity) { onFinished(false) }
                 return@runOnMain
             }
@@ -643,22 +658,23 @@ object AdManager {
             return
         }
 
-        val cachedAd = rewardedCache.remove(adUnitId)
-        val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollRewardedIfActive(adUnitId) else null
-        val ad = cachedAd ?: preloadedAd
-        if (ad == null) {
-            Log.e("AdManager", "Rewarded ad not ready for ID: $adUnitId")
-            invokeOnUiThread(activity, onAdClosed)
-            return
-        }
-
         val appContext = context.applicationContext
-        val shouldReloadManually = reloadAfterShow && preloadedAd == null
         runOnMain {
-            if (!activity.isUsableForAd()) {
+            if (!_isAdsEnabled.value || !activity.isUsableForAd()) {
                 invokeOnUiThread(activity, onAdClosed)
                 return@runOnMain
             }
+
+            val cachedAd = rewardedCache.remove(adUnitId)
+            val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollRewardedIfActive(adUnitId) else null
+            val ad = cachedAd ?: preloadedAd
+            if (ad == null) {
+                Log.e("AdManager", "Rewarded ad not ready for ID: $adUnitId")
+                invokeOnUiThread(activity, onAdClosed)
+                return@runOnMain
+            }
+
+            val shouldReloadManually = reloadAfterShow && preloadedAd == null
             ad.adEventCallback = object : RewardedAdEventCallback {
                 override fun onAdDismissedFullScreenContent() {
                     Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
@@ -723,6 +739,7 @@ object AdManager {
         }
     }
 
+    @MainThread
     @JvmOverloads
     fun showPictureInPictureAd(
         context: Context,
@@ -739,8 +756,7 @@ object AdManager {
             return false
         }
 
-        val ad = pipCache[adUnitId]
-        if (ad == null) {
+        if (!pipCache.containsKey(adUnitId)) {
             Log.e("AdManager", "PictureInPictureAd not ready for ID: $adUnitId")
             return false
         }
@@ -751,40 +767,34 @@ object AdManager {
             .build()
 
         val activityRef = WeakReference(activity)
-        var lifecycleObserver: LifecycleEventObserver? = null
         val lifecycleOwner = if (presentationScope == PictureInPictureAdPresentationScope.SCREEN) {
             activity as? LifecycleOwner
         } else {
             null
         }
 
-        fun detachLifecycleObserver() {
-            val observer = lifecycleObserver ?: return
-            lifecycleObserver = null
-            lifecycleOwner?.let { owner ->
-                runOnMain { owner.lifecycle.removeObserver(observer) }
-            }
-        }
-
         runOnMain {
             val host = activityRef.get()
-            if (host == null || !host.isUsableForAd()) {
-                detachLifecycleObserver()
+            if (!_isAdsEnabled.value || host == null || !host.isUsableForAd()) {
+                detachPipObserver(adUnitId)
                 return@runOnMain
             }
+            val ad = pipCache[adUnitId] ?: return@runOnMain
+
+            detachPipObserver(adUnitId)
             if (lifecycleOwner != null) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_DESTROY) {
                         val currentHost = activityRef.get()
                         if (currentHost == null || currentHost.isFinishing || currentHost.isDestroyed) {
-                            detachLifecycleObserver()
+                            detachPipObserver(adUnitId)
                             if (pipCache.remove(adUnitId, ad)) {
                                 destroyPipAdsOnMain(listOf(ad))
                             }
                         }
                     }
                 }
-                lifecycleObserver = observer
+                pipObservers[adUnitId] = WeakReference(lifecycleOwner) to observer
                 lifecycleOwner.lifecycle.addObserver(observer)
             }
 
@@ -798,15 +808,14 @@ object AdManager {
                     Log.d("AdManager", "PictureInPictureAd hidden for ID: $adUnitId")
                     val callback = onAdHidden
                     ad.adEventCallback = null
-                    detachLifecycleObserver()
+                    detachPipObserver(adUnitId)
                     invokeOnUiThread(activityRef.get(), callback)
                 }
 
                 override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                     Log.e("AdManager", "PictureInPictureAd failed to show: ${fullScreenContentError.message}")
                     val callback = onAdFailedToShow
-                    ad.adEventCallback = null
-                    detachLifecycleObserver()
+                    detachPipObserver(adUnitId)
                     pipCache.remove(adUnitId, ad)
                     destroyPipAdsOnMain(listOf(ad))
                     invokeOnUiThread(activityRef.get()) { callback?.invoke(fullScreenContentError) }
@@ -823,6 +832,7 @@ object AdManager {
     }
 
     fun destroyPictureInPictureAd(adUnitId: String = AdsConstants.AD_PIP_TEST_ID) {
+        detachPipObserver(adUnitId)
         pipCache.remove(adUnitId)?.let { ad ->
             destroyPipAdsOnMain(listOf(ad))
         }
