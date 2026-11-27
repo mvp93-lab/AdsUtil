@@ -435,6 +435,12 @@ object AdManager {
         val request = NativeAdRequest.Builder(finalAdUnitId, listOf(NativeAd.NativeAdType.NATIVE)).build()
         NativeAdLoader.load(request, object : NativeAdLoaderCallback {
             override fun onNativeAdLoaded(nativeAd: NativeAd) {
+                if (!_isAdsEnabled.value) {
+                    Log.d("AdManager", "Discarding NativeAd ($screenTag): ads disabled while loading")
+                    runOnMain { nativeAd.destroy() }
+                    onAdFailed(LoadAdError(LoadAdError.ErrorCode.INTERNAL_ERROR, "Ads disabled by remote config"))
+                    return
+                }
                 nativeAdCache[screenTag] = nativeAd
                 onAdLoaded(nativeAd)
             }
@@ -480,6 +486,13 @@ object AdManager {
             suspendCancellableCoroutine { continuation ->
                 AppOpenAd.load(request, object : AdLoadCallback<AppOpenAd> {
                     override fun onAdLoaded(ad: AppOpenAd) {
+                        if (!_isAdsEnabled.value) {
+                            appOpenAdCache = null
+                            runOnMain { ad.destroy() }
+                            Log.d("AdManager", "Discarding AppOpenAd: ads disabled while loading")
+                            if (continuation.isActive) continuation.resume(false)
+                            return
+                        }
                         appOpenAdCache = CachedAppOpenAd(ad = ad, loadedAtMs = clockMs())
                         Log.d("AdManager", "AppOpenAd loaded successfully")
                         if (continuation.isActive) continuation.resume(true)
