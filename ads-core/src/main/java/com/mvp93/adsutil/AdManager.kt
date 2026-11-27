@@ -13,6 +13,7 @@ import com.google.android.libraries.ads.mobile.sdk.banner.BannerAd
 import com.google.android.libraries.ads.mobile.sdk.banner.BannerAdRequest
 import com.google.android.libraries.ads.mobile.sdk.common.AdLoadCallback
 import com.google.android.libraries.ads.mobile.sdk.common.AdRequest
+import com.google.android.libraries.ads.mobile.sdk.common.ExperimentalApi
 import com.google.android.libraries.ads.mobile.sdk.common.FullScreenContentError
 import com.google.android.libraries.ads.mobile.sdk.common.LoadAdError
 import com.google.android.libraries.ads.mobile.sdk.initialization.InitializationConfig
@@ -22,6 +23,12 @@ import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAd
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdLoader
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdLoaderCallback
 import com.google.android.libraries.ads.mobile.sdk.nativead.NativeAdRequest
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAd
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdEventCallback
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdOptions
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPosition
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPresentationScope
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdRequest
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardItem
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardedAd
 import com.google.android.libraries.ads.mobile.sdk.rewarded.RewardedAdEventCallback
@@ -44,6 +51,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
+@OptIn(ExperimentalApi::class)
 object AdManager {
     internal const val APP_OPEN_AD_EXPIRATION_MS = 4 * 60 * 60 * 1000L
 
@@ -64,6 +72,8 @@ object AdManager {
     private val nativeAdCache = ConcurrentHashMap<String, NativeAd>()
     private val rewardedCache = ConcurrentHashMap<String, RewardedAd>()
     private val rewardedLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val pipCache = ConcurrentHashMap<String, PictureInPictureAd>()
+    private val pipLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     @Volatile
     private var appOpenAdCache: CachedAppOpenAd? = null
     private val appOpenLoadMutex = Mutex()
@@ -84,6 +94,9 @@ object AdManager {
             val bannersToDestroy = bannerCache.values.map { it.adView }
             bannerCache.clear()
             destroyAdViewsOnMain(bannersToDestroy)
+            val pipsToDestroy = pipCache.values.toList()
+            pipCache.clear()
+            destroyPipAdsOnMain(pipsToDestroy)
             nativeAdCache.clear()
             interstitialCache.clear()
             rewardedCache.clear()
@@ -91,13 +104,25 @@ object AdManager {
         }
     }
 
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            scope.launch { block() }
+        }
+    }
+
     private fun destroyAdViewsOnMain(adViews: List<AdView>) {
         if (adViews.isEmpty()) return
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            adViews.forEach { it.destroy() }
-        } else {
-            scope.launch {
-                adViews.forEach { it.destroy() }
+        runOnMain { adViews.forEach { it.destroy() } }
+    }
+
+    private fun destroyPipAdsOnMain(pipAds: List<PictureInPictureAd>) {
+        if (pipAds.isEmpty()) return
+        runOnMain {
+            pipAds.forEach {
+                it.hide()
+                it.destroy()
             }
         }
     }
@@ -567,6 +592,99 @@ object AdManager {
             activity.runOnUiThread {
                 onUserEarnedReward(rewardItem)
             }
+        }
+    }
+
+    fun isPictureInPictureAdLoaded(adUnitId: String = AdsConstants.AD_PIP_TEST_ID): Boolean =
+        pipCache.containsKey(adUnitId)
+
+    suspend fun loadPictureInPictureAd(
+        context: Context,
+        adUnitId: String = AdsConstants.AD_PIP_TEST_ID
+    ): Boolean {
+        Log.d("AdManager", "loadPictureInPictureAd called for: $adUnitId")
+        if (!canLoadAd("pip")) return false
+
+        val appContext = context.applicationContext
+        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.AD_PIP_TEST_ID else adUnitId
+        val request = PictureInPictureAdRequest.Builder(finalAdUnitId).build()
+
+        return deduplicateLoad(
+            key = adUnitId,
+            cache = pipCache,
+            inFlightLoads = pipLoads
+        ) { onLoaded, onFailed ->
+            PictureInPictureAd.load(request, object : AdLoadCallback<PictureInPictureAd> {
+                override fun onAdLoaded(ad: PictureInPictureAd) {
+                    Log.d("AdManager", "PictureInPictureAd loaded for ID: $adUnitId")
+                    onLoaded(ad)
+                }
+
+                override fun onAdFailedToLoad(adError: LoadAdError) {
+                    Log.e("AdManager", "PictureInPictureAd failed to load for ID $adUnitId: ${adError.message}")
+                    onFailed()
+                }
+            })
+        }
+    }
+
+    @JvmOverloads
+    fun showPictureInPictureAd(
+        context: Context,
+        adUnitId: String = AdsConstants.AD_PIP_TEST_ID,
+        position: PictureInPictureAdPosition = PictureInPictureAdPosition.DEFAULT,
+        presentationScope: PictureInPictureAdPresentationScope = PictureInPictureAdPresentationScope.SCREEN,
+        onAdShown: (() -> Unit)? = null,
+        onAdHidden: (() -> Unit)? = null,
+        onAdFailedToShow: ((FullScreenContentError) -> Unit)? = null
+    ): Boolean {
+        val activity = context.findActivity()
+        if (!_isAdsEnabled.value || activity == null || !activity.isUsableForAd()) {
+            Log.e("AdManager", "Cannot show PictureInPictureAd: ads disabled or Activity unavailable")
+            return false
+        }
+
+        val ad = pipCache[adUnitId]
+        if (ad == null) {
+            Log.e("AdManager", "PictureInPictureAd not ready for ID: $adUnitId")
+            return false
+        }
+
+        val options = PictureInPictureAdOptions.Builder()
+            .setPosition(position)
+            .setPresentationScope(presentationScope)
+            .build()
+
+        ad.adEventCallback = object : PictureInPictureAdEventCallback {
+            override fun onAdShown() {
+                Log.d("AdManager", "PictureInPictureAd shown for ID: $adUnitId")
+                invokeOnUiThread(activity, onAdShown)
+            }
+
+            override fun onAdHidden() {
+                Log.d("AdManager", "PictureInPictureAd hidden for ID: $adUnitId")
+                invokeOnUiThread(activity, onAdHidden)
+            }
+
+            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                Log.e("AdManager", "PictureInPictureAd failed to show: ${fullScreenContentError.message}")
+                pipCache.remove(adUnitId, ad)
+                destroyPipAdsOnMain(listOf(ad))
+                invokeOnUiThread(activity) { onAdFailedToShow?.invoke(fullScreenContentError) }
+            }
+        }
+        ad.show(activity, options)
+        return true
+    }
+
+    fun hidePictureInPictureAd(adUnitId: String = AdsConstants.AD_PIP_TEST_ID) {
+        val ad = pipCache[adUnitId] ?: return
+        runOnMain { ad.hide() }
+    }
+
+    fun destroyPictureInPictureAd(adUnitId: String = AdsConstants.AD_PIP_TEST_ID) {
+        pipCache.remove(adUnitId)?.let { ad ->
+            destroyPipAdsOnMain(listOf(ad))
         }
     }
 }

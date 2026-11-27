@@ -208,7 +208,8 @@ class AdManagerTest {
             AdsConstants.ADS_OPEN_APP_TEST_ID,
             AdsConstants.ADS_ADAPTIVE_BANNER_TEST_ID,
             AdsConstants.AD_NATIVE_VIDEO_TEST_ID,
-            AdsConstants.AD_REWARDED_TEST_ID
+            AdsConstants.AD_REWARDED_TEST_ID,
+            AdsConstants.AD_PIP_TEST_ID
         ).forEach { id ->
             assertTrue("Expected Google test prefix for $id", id.startsWith(testPrefix))
         }

@@ -9,4 +9,5 @@ object AdsConstants {
     const val ADS_ADAPTIVE_BANNER_TEST_ID = "ca-app-pub-3940256099942544/9214589741"
     const val AD_NATIVE_VIDEO_TEST_ID = "ca-app-pub-3940256099942544/1044960115"
     const val AD_REWARDED_TEST_ID = "ca-app-pub-3940256099942544/5224354917"
+    const val AD_PIP_TEST_ID = "ca-app-pub-3940256099942544/9657123429"
 }

@@ -9,6 +9,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.google.android.libraries.ads.mobile.sdk.common.ExperimentalApi
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPosition
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPresentationScope
 import com.mvp93.adsutil.AdManager
 import com.mvp93.adsutil.ui.BannerAd
 import com.mvp93.adsutil.ui.BigNativeAd
@@ -17,6 +20,7 @@ import com.mvp93.adsutil.utils.AdsConstants
 import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalApi::class)
 @Composable
 fun TestAdsScreen(
     isPrivacyOptionsRequired: Boolean = false,
@@ -158,6 +162,43 @@ fun TestAdsScreen(
             }
         }) {
             Text("Load App Open Ad")
+        }
+
+        HorizontalDivider()
+
+        // Picture-in-Picture (PiP) Ad
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = {
+                coroutineScope.launch {
+                    val loaded = AdManager.loadPictureInPictureAd(context, AdsConstants.AD_PIP_TEST_ID)
+                    if (loaded) {
+                        val shown = AdManager.showPictureInPictureAd(
+                            context = context,
+                            adUnitId = AdsConstants.AD_PIP_TEST_ID,
+                            position = PictureInPictureAdPosition.BOTTOM_RIGHT,
+                            presentationScope = PictureInPictureAdPresentationScope.SCREEN,
+                            onAdShown = { context.showDebugToast("PiP Ad Shown") },
+                            onAdHidden = { context.showDebugToast("PiP Ad Hidden") },
+                            onAdFailedToShow = { err -> context.showDebugToast("PiP Show Failed: ${err.message}") }
+                        )
+                        if (!shown) {
+                            context.showDebugToast("PiP Ad Could Not Show")
+                        }
+                    } else {
+                        context.showDebugToast("PiP Ad Load Failed")
+                    }
+                }
+            }) {
+                Text("Load & Show PiP Ad")
+            }
+            OutlinedButton(onClick = {
+                AdManager.destroyPictureInPictureAd(AdsConstants.AD_PIP_TEST_ID)
+            }) {
+                Text("Close PiP")
+            }
         }
 
         HorizontalDivider()
