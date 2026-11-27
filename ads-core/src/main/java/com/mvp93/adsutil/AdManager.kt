@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.MainThread
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
@@ -217,6 +218,7 @@ object AdManager {
         }
     }
 
+    @MainThread
     @JvmOverloads
     fun getOrCreateBanner(
         context: Context,
@@ -248,7 +250,7 @@ object AdManager {
         val newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId, adSize = adSize)
         val existing = bannerCache.putIfAbsent(key, newEntry)
         if (existing != null) {
-            newAdView.destroy()
+            destroyAdViewsOnMain(listOf(newAdView))
             return existing.adView
         }
 
@@ -372,32 +374,38 @@ object AdManager {
 
         val appContext = context.applicationContext
         val shouldReloadManually = reloadAfterShow && preloadedAd == null
-        ad.adEventCallback = object : InterstitialAdEventCallback {
-            override fun onAdDismissedFullScreenContent() {
-                Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
-                if (shouldReloadManually) {
-                    scope.launch {
-                        loadInterstitial(appContext, adUnitId)
-                    }
-                }
+        runOnMain {
+            if (!activity.isUsableForAd()) {
                 invokeOnUiThread(activity, onAdClosed)
+                return@runOnMain
             }
-
-            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
-                Log.e("AdManager", "Interstitial failed to show: ${fullScreenContentError.message}")
-                if (shouldReloadManually) {
-                    scope.launch {
-                        loadInterstitial(appContext, adUnitId)
+            ad.adEventCallback = object : InterstitialAdEventCallback {
+                override fun onAdDismissedFullScreenContent() {
+                    Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
+                    if (shouldReloadManually) {
+                        scope.launch {
+                            loadInterstitial(appContext, adUnitId)
+                        }
                     }
+                    invokeOnUiThread(activity, onAdClosed)
                 }
-                invokeOnUiThread(activity, onAdClosed)
-            }
 
-            override fun onAppEvent(name: String, data: String?) {
-                Log.d("AdManager", "App event: $name, $data")
+                override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                    Log.e("AdManager", "Interstitial failed to show: ${fullScreenContentError.message}")
+                    if (shouldReloadManually) {
+                        scope.launch {
+                            loadInterstitial(appContext, adUnitId)
+                        }
+                    }
+                    invokeOnUiThread(activity, onAdClosed)
+                }
+
+                override fun onAppEvent(name: String, data: String?) {
+                    Log.d("AdManager", "App event: $name, $data")
+                }
             }
+            ad.show(activity)
         }
-        ad.show(activity)
     }
 
     suspend fun loadNativeAd(
@@ -550,18 +558,24 @@ object AdManager {
             invokeOnUiThread(activity, onAdDismissed)
             return
         }
-        ad.adEventCallback = object : AppOpenAdEventCallback {
-            override fun onAdDismissedFullScreenContent() {
-                Log.d("AdManager", "AppOpenAd dismissed")
+        runOnMain {
+            if (!activity.isUsableForAd()) {
                 invokeOnUiThread(activity, onAdDismissed)
+                return@runOnMain
             }
+            ad.adEventCallback = object : AppOpenAdEventCallback {
+                override fun onAdDismissedFullScreenContent() {
+                    Log.d("AdManager", "AppOpenAd dismissed")
+                    invokeOnUiThread(activity, onAdDismissed)
+                }
 
-            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
-                Log.e("AdManager", "AppOpenAd failed to show: ${fullScreenContentError.message}")
-                invokeOnUiThread(activity, onAdDismissed)
+                override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                    Log.e("AdManager", "AppOpenAd failed to show: ${fullScreenContentError.message}")
+                    invokeOnUiThread(activity, onAdDismissed)
+                }
             }
+            ad.show(activity)
         }
-        ad.show(activity)
     }
 
     fun isAppOpenAdAvailable(): Boolean = getValidAppOpenAd() != null
@@ -632,32 +646,38 @@ object AdManager {
 
         val appContext = context.applicationContext
         val shouldReloadManually = reloadAfterShow && preloadedAd == null
-        ad.adEventCallback = object : RewardedAdEventCallback {
-            override fun onAdDismissedFullScreenContent() {
-                Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
-                if (shouldReloadManually) {
-                    scope.launch {
-                        loadRewarded(appContext, adUnitId)
-                    }
-                }
+        runOnMain {
+            if (!activity.isUsableForAd()) {
                 invokeOnUiThread(activity, onAdClosed)
+                return@runOnMain
+            }
+            ad.adEventCallback = object : RewardedAdEventCallback {
+                override fun onAdDismissedFullScreenContent() {
+                    Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
+                    if (shouldReloadManually) {
+                        scope.launch {
+                            loadRewarded(appContext, adUnitId)
+                        }
+                    }
+                    invokeOnUiThread(activity, onAdClosed)
+                }
+
+                override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                    Log.e("AdManager", "Rewarded ad failed to show: ${fullScreenContentError.message}")
+                    if (shouldReloadManually) {
+                        scope.launch {
+                            loadRewarded(appContext, adUnitId)
+                        }
+                    }
+                    invokeOnUiThread(activity, onAdClosed)
+                }
             }
 
-            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
-                Log.e("AdManager", "Rewarded ad failed to show: ${fullScreenContentError.message}")
-                if (shouldReloadManually) {
-                    scope.launch {
-                        loadRewarded(appContext, adUnitId)
-                    }
+            ad.show(activity) { rewardItem ->
+                Log.d("AdManager", "User earned reward: ${rewardItem.amount} ${rewardItem.type}")
+                activity.runOnUiThread {
+                    onUserEarnedReward(rewardItem)
                 }
-                invokeOnUiThread(activity, onAdClosed)
-            }
-        }
-
-        ad.show(activity) { rewardItem ->
-            Log.d("AdManager", "User earned reward: ${rewardItem.amount} ${rewardItem.type}")
-            activity.runOnUiThread {
-                onUserEarnedReward(rewardItem)
             }
         }
     }
@@ -738,47 +758,54 @@ object AdManager {
             }
         }
 
-        if (lifecycleOwner != null) {
-            val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_DESTROY) {
-                    val host = activityRef.get()
-                    if (host == null || host.isFinishing || host.isDestroyed) {
-                        detachLifecycleObserver()
-                        if (pipCache.remove(adUnitId, ad)) {
-                            destroyPipAdsOnMain(listOf(ad))
+        runOnMain {
+            val host = activityRef.get()
+            if (host == null || !host.isUsableForAd()) {
+                detachLifecycleObserver()
+                return@runOnMain
+            }
+            if (lifecycleOwner != null) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_DESTROY) {
+                        val currentHost = activityRef.get()
+                        if (currentHost == null || currentHost.isFinishing || currentHost.isDestroyed) {
+                            detachLifecycleObserver()
+                            if (pipCache.remove(adUnitId, ad)) {
+                                destroyPipAdsOnMain(listOf(ad))
+                            }
                         }
                     }
                 }
+                lifecycleObserver = observer
+                lifecycleOwner.lifecycle.addObserver(observer)
             }
-            lifecycleObserver = observer
-            runOnMain { lifecycleOwner.lifecycle.addObserver(observer) }
+
+            ad.adEventCallback = object : PictureInPictureAdEventCallback {
+                override fun onAdShown() {
+                    Log.d("AdManager", "PictureInPictureAd shown for ID: $adUnitId")
+                    invokeOnUiThread(activityRef.get(), onAdShown)
+                }
+
+                override fun onAdHidden() {
+                    Log.d("AdManager", "PictureInPictureAd hidden for ID: $adUnitId")
+                    val callback = onAdHidden
+                    ad.adEventCallback = null
+                    detachLifecycleObserver()
+                    invokeOnUiThread(activityRef.get(), callback)
+                }
+
+                override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
+                    Log.e("AdManager", "PictureInPictureAd failed to show: ${fullScreenContentError.message}")
+                    val callback = onAdFailedToShow
+                    ad.adEventCallback = null
+                    detachLifecycleObserver()
+                    pipCache.remove(adUnitId, ad)
+                    destroyPipAdsOnMain(listOf(ad))
+                    invokeOnUiThread(activityRef.get()) { callback?.invoke(fullScreenContentError) }
+                }
+            }
+            ad.show(host, options)
         }
-
-        ad.adEventCallback = object : PictureInPictureAdEventCallback {
-            override fun onAdShown() {
-                Log.d("AdManager", "PictureInPictureAd shown for ID: $adUnitId")
-                invokeOnUiThread(activityRef.get(), onAdShown)
-            }
-
-            override fun onAdHidden() {
-                Log.d("AdManager", "PictureInPictureAd hidden for ID: $adUnitId")
-                val callback = onAdHidden
-                ad.adEventCallback = null
-                detachLifecycleObserver()
-                invokeOnUiThread(activityRef.get(), callback)
-            }
-
-            override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
-                Log.e("AdManager", "PictureInPictureAd failed to show: ${fullScreenContentError.message}")
-                val callback = onAdFailedToShow
-                ad.adEventCallback = null
-                detachLifecycleObserver()
-                pipCache.remove(adUnitId, ad)
-                destroyPipAdsOnMain(listOf(ad))
-                invokeOnUiThread(activityRef.get()) { callback?.invoke(fullScreenContentError) }
-            }
-        }
-        ad.show(activity, options)
         return true
     }
 
