@@ -240,26 +240,25 @@ object AdManager {
         }
 
         Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId, size: $adSize")
-        lateinit var newEntry: CachedBanner
-        val newAdView = AdView(context).apply {
-            val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, adSize).build()
-            this.loadAd(bannerRequest, object : AdLoadCallback<BannerAd> {
-                override fun onAdLoaded(ad: BannerAd) {
-                    Log.d("AdManager", "BannerAd ($key) loaded successfully")
-                }
-
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    Log.e("AdManager", "BannerAd ($key) failed to load: ${adError.message}")
-                    bannerCache.remove(key, newEntry)
-                }
-            })
-        }
-        newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId, adSize = adSize)
+        val newAdView = AdView(context)
+        val newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId, adSize = adSize)
         val existing = bannerCache.putIfAbsent(key, newEntry)
         if (existing != null) {
             newAdView.destroy()
             return existing.adView
         }
+
+        val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, adSize).build()
+        newAdView.loadAd(bannerRequest, object : AdLoadCallback<BannerAd> {
+            override fun onAdLoaded(ad: BannerAd) {
+                Log.d("AdManager", "BannerAd ($key) loaded successfully")
+            }
+
+            override fun onAdFailedToLoad(adError: LoadAdError) {
+                Log.e("AdManager", "BannerAd ($key) failed to load: ${adError.message}")
+                bannerCache.remove(key, newEntry)
+            }
+        })
         return newAdView
     }
 
