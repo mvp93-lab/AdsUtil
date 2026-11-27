@@ -298,12 +298,12 @@ object AdManager {
                     newDeferred.complete(false)
                 }
             )
-            return newDeferred.await()
         } catch (t: Throwable) {
             inFlightLoads.remove(key, newDeferred)
             newDeferred.complete(false)
             throw t
         }
+        return newDeferred.await()
     }
 
     suspend fun loadInterstitial(

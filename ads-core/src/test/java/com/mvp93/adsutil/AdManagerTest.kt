@@ -230,4 +230,41 @@ class AdManagerTest {
 
         AdPreloaderManager.stopAll()
     }
+
+    @Test
+    fun `deduplicateLoad keeps waiting caller succeeding when first caller cancels`() = runBlocking {
+        val cache = ConcurrentHashMap<String, String>()
+        val inFlight = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+        var completeSuccess: ((String) -> Unit)? = null
+
+        val first = async {
+            AdManager.deduplicateLoad(
+                key = "unit_cancel",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { onLoaded, _ ->
+                completeSuccess = onLoaded
+            }
+        }
+        while (completeSuccess == null) {
+            kotlinx.coroutines.yield()
+        }
+
+        val second = async {
+            AdManager.deduplicateLoad(
+                key = "unit_cancel",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { _, _ -> }
+        }
+        kotlinx.coroutines.yield()
+
+        // Cancel first caller while request is still in-flight
+        first.cancel()
+        completeSuccess!!.invoke("ad_ok")
+
+        assertTrue(second.await())
+        assertEquals("ad_ok", cache["unit_cancel"])
+        assertTrue(inFlight.isEmpty())
+    }
 }
