@@ -9,12 +9,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.mvp93.adsutil.AdManager
 import com.mvp93.adsutil.ConsentManager
 import com.mvp93.adsutil.sample.ui.theme.AdsUtilExampleTheme
 import com.mvp93.adsutil.utils.AdsConstants
+import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -26,9 +31,14 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             AdsUtilExampleTheme {
+                var isPrivacyOptionsRequired by remember {
+                    mutableStateOf(consentManager.isPrivacyOptionsRequired)
+                }
+
                 LaunchedEffect(Unit) {
                     consentManager.requestConsentInfoUpdate(object : ConsentManager.OnConsentCheckListener {
                         override fun onConsentCheckCompleted() {
+                            isPrivacyOptionsRequired = consentManager.isPrivacyOptionsRequired
                             if (consentManager.canRequestAds) {
                                 lifecycleScope.launch {
                                     AdManager.initialize(applicationContext, AdsConstants.ADS_APP_TEST_ID)
@@ -37,6 +47,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         override fun onConsentFormError(error: String) {
+                            isPrivacyOptionsRequired = consentManager.isPrivacyOptionsRequired
                             // Even on error, we can try to initialize if we have consent from before
                             if (consentManager.canRequestAds) {
                                 lifecycleScope.launch {
@@ -49,7 +60,17 @@ class MainActivity : ComponentActivity() {
                 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
-                        TestAdsScreen()
+                        TestAdsScreen(
+                            isPrivacyOptionsRequired = isPrivacyOptionsRequired,
+                            onOpenPrivacyOptions = {
+                                consentManager.showPrivacyOptionsForm { error ->
+                                    isPrivacyOptionsRequired = consentManager.isPrivacyOptionsRequired
+                                    if (error != null) {
+                                        showDebugToast("Privacy form error: $error")
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             }

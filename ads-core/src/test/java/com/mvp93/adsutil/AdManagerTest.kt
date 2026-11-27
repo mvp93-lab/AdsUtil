@@ -143,4 +143,74 @@ class AdManagerTest {
             AdManager.resolveBannerTestAdUnitId(AdSize.getInlineAdaptiveBannerAdSize(320, 100))
         )
     }
+
+    @Test
+    fun `deduplicateLoad notifies all waiters on failure and allows subsequent retry`() = runBlocking {
+        val cache = ConcurrentHashMap<String, String>()
+        val inFlight = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+        val invocations = AtomicInteger(0)
+        var triggerFailure: (() -> Unit)? = null
+
+        val first = async {
+            AdManager.deduplicateLoad(
+                key = "unit_fail",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { _, onFailed ->
+                invocations.incrementAndGet()
+                triggerFailure = onFailed
+            }
+        }
+        val second = async {
+            AdManager.deduplicateLoad(
+                key = "unit_fail",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { _, _ ->
+                invocations.incrementAndGet()
+            }
+        }
+
+        while (triggerFailure == null) {
+            kotlinx.coroutines.yield()
+        }
+        triggerFailure!!.invoke()
+
+        assertFalse(first.await())
+        assertFalse(second.await())
+        assertEquals(1, invocations.get())
+        assertTrue(inFlight.isEmpty())
+        assertFalse(cache.containsKey("unit_fail"))
+
+        // Subsequent retry should be able to initiate a fresh load
+        val retried = AdManager.deduplicateLoad(
+            key = "unit_fail",
+            cache = cache,
+            inFlightLoads = inFlight
+        ) { onLoaded, _ ->
+            invocations.incrementAndGet()
+            onLoaded("recovered_ad")
+        }
+
+        assertTrue(retried)
+        assertEquals(2, invocations.get())
+        assertEquals("recovered_ad", cache["unit_fail"])
+    }
+
+    @Test
+    fun `AdsConstants test ids use official Google test publisher prefix`() {
+        val testPrefix = "ca-app-pub-3940256099942544"
+        listOf(
+            AdsConstants.ADS_APP_TEST_ID,
+            AdsConstants.AD_BANNER_TEST_ID,
+            AdsConstants.AD_NATIVE_TEST_ID,
+            AdsConstants.AD_INTERSTITIAL_TEST_ID,
+            AdsConstants.ADS_OPEN_APP_TEST_ID,
+            AdsConstants.ADS_ADAPTIVE_BANNER_TEST_ID,
+            AdsConstants.AD_NATIVE_VIDEO_TEST_ID,
+            AdsConstants.AD_REWARDED_TEST_ID
+        ).forEach { id ->
+            assertTrue("Expected Google test prefix for $id", id.startsWith(testPrefix))
+        }
+    }
 }

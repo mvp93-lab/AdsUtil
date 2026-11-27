@@ -18,11 +18,16 @@ import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.launch
 
 @Composable
-fun TestAdsScreen() {
+fun TestAdsScreen(
+    isPrivacyOptionsRequired: Boolean = false,
+    onOpenPrivacyOptions: () -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
+    val isAdsEnabled by AdManager.isAdsEnabled.collectAsState()
+
     var showBanner by remember { mutableStateOf(false) }
+    var useAdaptiveBanner by remember { mutableStateOf(false) }
     var showSmallNative by remember { mutableStateOf(false) }
     var showBigNative by remember { mutableStateOf(false) }
     var rewardCoins by remember { mutableIntStateOf(0) }
@@ -37,12 +42,72 @@ fun TestAdsScreen() {
     ) {
         Text(text = "Ads Util Test Screen", style = MaterialTheme.typography.headlineMedium)
 
+        // Global VIP / Remove Ads Toggle
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isAdsEnabled) "Ads Enabled" else "VIP Mode (Ads Disabled)",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Toggle AdManager.setAdsEnabled()",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(
+                    checked = isAdsEnabled,
+                    onCheckedChange = { enabled ->
+                        AdManager.setAdsEnabled(enabled)
+                    }
+                )
+            }
+        }
+
+        if (isPrivacyOptionsRequired) {
+            OutlinedButton(onClick = onOpenPrivacyOptions) {
+                Text("Privacy Settings (UMP)")
+            }
+        }
+
+        HorizontalDivider()
+
         // Banner Ad
-        Button(onClick = { showBanner = !showBanner }) {
-            Text(if (showBanner) "Hide Banner" else "Load Banner")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(onClick = { showBanner = !showBanner }) {
+                Text(if (showBanner) "Hide Banner" else "Load Banner")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = useAdaptiveBanner,
+                    onCheckedChange = { useAdaptiveBanner = it }
+                )
+                Text("Adaptive")
+            }
         }
         if (showBanner) {
-            BannerAd(modifier = Modifier.fillMaxWidth())
+            BannerAd(
+                modifier = Modifier.fillMaxWidth(),
+                key = if (useAdaptiveBanner) "sample_adaptive_banner" else "sample_standard_banner",
+                adUnitId = if (useAdaptiveBanner) {
+                    AdsConstants.ADS_ADAPTIVE_BANNER_TEST_ID
+                } else {
+                    AdsConstants.AD_BANNER_TEST_ID
+                },
+                isAdaptive = useAdaptiveBanner
+            )
         }
 
         HorizontalDivider()
