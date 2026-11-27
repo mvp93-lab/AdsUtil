@@ -35,9 +35,9 @@ class AdManagerTest {
     }
 
     @Test
-    fun `default test device ids are preserved in ConsentManager`() {
+    fun `default test device ids are empty by default in ConsentManager`() {
         assertEquals(
-            listOf("C6F069CF4A4DC8F0272DA62232522711"),
+            emptyList<String>(),
             ConsentManager.DEFAULT_TEST_DEVICE_IDS
         )
     }

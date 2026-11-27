@@ -69,11 +69,6 @@ class ConsentManager(private val activity: Activity) {
             { requestError ->
                 Log.e("ConsentManager", "Consent request error: [${requestError.errorCode}] ${requestError.message}")
                 onConsentCheckListener.onConsentFormError(requestError.message)
-
-                // Even on error, if we can request ads (e.g. from previous session), we should
-                if (canRequestAds) {
-                    onConsentCheckListener.onConsentCheckCompleted()
-                }
             }
         )
     }
@@ -112,6 +107,6 @@ class ConsentManager(private val activity: Activity) {
     }
 
     companion object {
-        val DEFAULT_TEST_DEVICE_IDS = listOf("C6F069CF4A4DC8F0272DA62232522711")
+        val DEFAULT_TEST_DEVICE_IDS: List<String> = emptyList()
     }
 }
