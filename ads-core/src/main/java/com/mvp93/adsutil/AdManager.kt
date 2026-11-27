@@ -54,7 +54,8 @@ object AdManager {
 
     private data class CachedBanner(
         val adView: AdView,
-        val adUnitId: String
+        val adUnitId: String,
+        val adSize: AdSize
     )
 
     private val interstitialCache = ConcurrentHashMap<String, InterstitialAd>()
@@ -175,14 +176,32 @@ object AdManager {
 
     private fun Activity.isUsableForAd(): Boolean = !isFinishing && !isDestroyed
 
-    fun getOrCreateBanner(context: Context, key: String, adUnitId: String): AdView? {
+    internal fun resolveBannerTestAdUnitId(adSize: AdSize): String {
+        val isAdaptive = adSize.isAnchoredAdaptiveBanner ||
+            adSize.isInlineAdaptiveBanner ||
+            adSize.isLargeAnchoredAdaptiveBanner
+        return if (isAdaptive) {
+            AdsConstants.ADS_ADAPTIVE_BANNER_TEST_ID
+        } else {
+            AdsConstants.AD_BANNER_TEST_ID
+        }
+    }
+
+    @JvmOverloads
+    fun getOrCreateBanner(
+        context: Context,
+        key: String,
+        adUnitId: String,
+        adSize: AdSize = AdSize.BANNER
+    ): AdView? {
         if (!_isInitialized.value || !_isAdsEnabled.value) return null
 
-        val finalAdUnitId = if (context.isDebug()) AdsConstants.AD_BANNER_TEST_ID else adUnitId
+        val finalAdUnitId = if (context.isDebug()) resolveBannerTestAdUnitId(adSize) else adUnitId
         val currentActivity = context.findActivity()
         bannerCache[key]?.let { cached ->
             val cachedActivity = cached.adView.context.findActivity()
             val isStale = cached.adUnitId != finalAdUnitId ||
+                cached.adSize != adSize ||
                 cachedActivity == null ||
                 !cachedActivity.isUsableForAd() ||
                 (currentActivity != null && cachedActivity !== currentActivity)
@@ -194,10 +213,10 @@ object AdManager {
             }
         }
 
-        Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId")
+        Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId, size: $adSize")
         lateinit var newEntry: CachedBanner
         val newAdView = AdView(context).apply {
-            val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, AdSize.BANNER).build()
+            val bannerRequest = BannerAdRequest.Builder(finalAdUnitId, adSize).build()
             this.loadAd(bannerRequest, object : AdLoadCallback<BannerAd> {
                 override fun onAdLoaded(ad: BannerAd) {
                     Log.d("AdManager", "BannerAd ($key) loaded successfully")
@@ -209,7 +228,7 @@ object AdManager {
                 }
             })
         }
-        newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId)
+        newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId, adSize = adSize)
         val existing = bannerCache.putIfAbsent(key, newEntry)
         if (existing != null) {
             newAdView.destroy()

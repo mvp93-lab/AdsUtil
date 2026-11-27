@@ -1,5 +1,6 @@
 package com.mvp93.adsutil
 
+import com.google.android.libraries.ads.mobile.sdk.banner.AdSize
 import com.mvp93.adsutil.utils.AdsConstants
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -132,5 +133,14 @@ class AdManagerTest {
         assertFalse(loaded)
         assertFalse(cache.containsKey("unit_1"))
         assertTrue(inFlight.isEmpty())
+    }
+
+    @Test
+    fun `resolveBannerTestAdUnitId selects adaptive test id for inline adaptive size`() {
+        assertEquals(AdsConstants.AD_BANNER_TEST_ID, AdManager.resolveBannerTestAdUnitId(AdSize.BANNER))
+        assertEquals(
+            AdsConstants.ADS_ADAPTIVE_BANNER_TEST_ID,
+            AdManager.resolveBannerTestAdUnitId(AdSize.getInlineAdaptiveBannerAdSize(320, 100))
+        )
     }
 }
