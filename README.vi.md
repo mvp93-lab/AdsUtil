@@ -7,7 +7,7 @@
 [![Min SDK](https://img.shields.io/badge/Min%20SDK-24-orange.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-blue.svg)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Ready-4285F4.svg)](https://developer.android.com/jetpack/compose)
-[![AdMob SDK](https://img.shields.io/badge/Google%20Ads%20Next--Gen-1.2.1-red.svg)](https://developers.google.com/admob)
+[![AdMob SDK](https://img.shields.io/badge/Google%20Ads%20Next--Gen-1.7.0-red.svg)](https://developers.google.com/admob)
 
 **AdsUtil** là thư viện Android hiện đại giúp tích hợp và quản lý **Google AdMob** trong ứng dụng **Jetpack Compose** một cách tinh gọn, tự động và tuân thủ chặt chẽ các chính sách mới nhất của Google.
 
@@ -17,18 +17,20 @@ Thư viện được tối ưu hóa đặc biệt với tài liệu chi tiết, 
 
 ## 🌟 Tính Năng Nổi Bật
 
-- 🚀 **Google Next-Generation Ads SDK:** Tiên phong áp dụng SDK thế hệ mới (`com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.2.1`), hoạt động bất đồng bộ mượt mà với Kotlin Coroutines.
+- 🚀 **Google Next-Generation Ads SDK:** Tiên phong áp dụng SDK thế hệ mới (`com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.7.0`), hoạt động bất đồng bộ mượt mà với Kotlin Coroutines.
 - 🎨 **Jetpack Compose Native:** Cung cấp sẵn các Composable (`BannerAd`, `SmallNativeAd`, `BigNativeAd`) hiển thị tức thì, không cần tự dựng `AndroidView`.
-- ✨ **Shimmer Skeleton Loading:** Tích hợp sẵn hiệu ứng hoạt họa Shimmer mượt mà trong lúc tải quảng cáo Native.
+- ✨ **Shimmer & Native Ads Theo Theme:** Tích hợp sẵn hiệu ứng Shimmer cùng bộ màu `NativeAdColors` / `NativeAdDefaults` tự động thích ứng Light/Dark của Material 3.
 - 🛡️ **Tự Động Quản Lý GDPR / UMP (Consent):** Bọc sẵn quy trình xin quyền riêng tư (Google User Messaging Platform SDK 4.0.0), kiểm tra trạng thái IAB TCF Purpose 1 trước khi tải quảng cáo, cung cấp sẵn hàm mở Privacy Options Form cho người dùng EEA.
 - ⚡ **Hỗ Trợ Toàn Diện Các Định Dạng Ads:**
-  - **App Open Ads:** Tự động lắng nghe vòng đời (`ProcessLifecycleOwner`) để bật quảng cáo khi mở/trở lại app.
-  - **Banner Ads:** Tự động cache theo key, không lo reload khi recompose / đổi tab.
+  - **App Open Ads:** Tự động lắng nghe vòng đời (`ProcessLifecycleOwner`) để bật quảng cáo khi mở/trở lại app, hỗ trợ kiểm tra hạn 4 giờ, cooldown và loại trừ Activity.
+  - **Banner & Adaptive Banner Ads:** Tự động cache theo key, không lo reload khi recompose / đổi tab, hỗ trợ cả banner chuẩn và Adaptive Banner (`isAdaptive = true`).
   - **Native Ads:** 2 định dạng (Small & Big tích hợp MediaView), tuân thủ chuẩn AdChoices và nhãn "Ad".
-  - **Interstitial Ads:** Tải bất đồng bộ coroutine, hỗ trợ cờ tự động preload lại sau khi xem.
+  - **Interstitial Ads:** Tải bất đồng bộ coroutine với chống load trùng và cờ tự động preload lại sau khi xem.
   - **Rewarded Ads:** Quảng cáo nhận thưởng chuẩn opt-in, phân tách rõ ràng giữa nhận thưởng và đóng quảng cáo.
+  - **Picture-in-Picture (PiP) Ads:** Quảng cáo nổi có thể kéo thả và tự hút vào 4 góc màn hình (`loadPictureInPictureAd` / `showPictureInPictureAd`).
+- 🧩 **Add-on Preload Tuỳ Chọn:** `AdPreloaderManager` bọc sẵn các `*AdPreloader` của Next-Gen SDK (opt-in theo từng placement), chạy song song mà không ảnh hưởng luồng tải theo nhu cầu.
 - 🔒 **Debug Safety:** Tự động nhận diện môi trường Debug để hoán đổi ID thật sang Google Test ID, kèm cơ chế `showDebugToast` không bao giờ làm phiền người dùng bản Production/Release.
-- 💎 **Quản Lý Trạng Thái Toàn Cục:** Bật/tắt quảng cáo toàn app (`setAdsEnabled`) chỉ bằng 1 dòng lệnh (hỗ trợ tính năng In-App Purchase / Mua gói VIP gỡ ads).
+- 💎 **Quản Lý Trạng Thái Toàn Cục:** Bật/tắt quảng cáo toàn app (`setAdsEnabled`) chỉ bằng 1 dòng lệnh (xóa cache, ẩn/hủy PiP ads và dừng toàn bộ preloader cho tính năng mua gói VIP gỡ ads).
 
 ---
 
@@ -225,9 +227,9 @@ fun PrivacySettingsButton(consentManager: ConsentManager) {
 
 ---
 
-### Bước 4: Banner Ads trong Compose
+### Bước 4: Banner Ads trong Compose (Chuẩn & Adaptive)
 
-Nhúng trực tiếp Composable `BannerAd`. Mỗi vị trí quảng cáo nên có một `key` riêng biệt để thư viện quản lý cache hiệu quả:
+Nhúng trực tiếp Composable `BannerAd`. Mỗi vị trí quảng cáo nên có một `key` riêng biệt để thư viện quản lý cache hiệu quả. Truyền `isAdaptive = true` để dùng Adaptive Banner tự giãn theo chiều ngang:
 
 ```kotlin
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -240,7 +242,8 @@ fun HomeScreenBanner() {
     BannerAd(
         modifier = Modifier.fillMaxWidth(),
         key = "home_screen_bottom_banner", // Key định danh giúp cache và tránh reload khi recompose
-        adUnitId = "YOUR_BANNER_AD_UNIT_ID"
+        adUnitId = "YOUR_BANNER_AD_UNIT_ID",
+        isAdaptive = true
     )
 }
 ```
@@ -249,7 +252,7 @@ fun HomeScreenBanner() {
 
 ### Bước 5: Native Ads trong Compose
 
-Thư viện cung cấp sẵn 2 loại bố cục Native Ad đạt chuẩn chính sách của Google (AdChoices, nhãn Ad, MediaView):
+Thư viện cung cấp sẵn 2 loại bố cục Native Ad đạt chuẩn chính sách của Google (AdChoices, nhãn Ad, MediaView), tự động ăn theo `MaterialTheme.colorScheme` (hoặc tùy biến qua `NativeAdDefaults.colors(...)` / `NativeAdDefaults.darkColors()`):
 
 #### Small Native Ad (Bố cục hàng ngang nhỏ gọn)
 ```kotlin
@@ -372,14 +375,69 @@ fun RewardButton(onRewardGranted: (Int) -> Unit) {
 
 ---
 
-### Bước 8: Quản Lý Trạng Thái VIP / Tắt Quảng Cáo (Remove Ads)
+### Bước 8: Picture-in-Picture (PiP) Ads (Beta)
+
+```kotlin
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPosition
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPresentationScope
+import com.mvp93.adsutil.AdManager
+import kotlinx.coroutines.launch
+
+@Composable
+fun PipAdButton() {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    Button(onClick = {
+        coroutineScope.launch {
+            val isLoaded = AdManager.loadPictureInPictureAd(context, "YOUR_PIP_AD_UNIT_ID")
+            if (isLoaded) {
+                AdManager.showPictureInPictureAd(
+                    context = context,
+                    adUnitId = "YOUR_PIP_AD_UNIT_ID",
+                    position = PictureInPictureAdPosition.BOTTOM_RIGHT,
+                    presentationScope = PictureInPictureAdPresentationScope.SCREEN
+                )
+            }
+        }
+    }) {
+        Text("Hiện quảng cáo nổi PiP")
+    }
+}
+```
+
+---
+
+### Bước 9: Add-on Preload Tuỳ Chọn (`AdPreloaderManager`)
+
+Nếu bạn muốn một vị trí cụ thể hiển thị ngay lập tức không chờ tải (ví dụ bỏ qua hiệu ứng Shimmer ở Native Ad màn Home hoặc preload sẵn một Interstitial quan trọng), hãy bật opt-in theo từng `adUnitId` qua `AdPreloaderManager`. Các vị trí không gọi `start*` vẫn tải theo nhu cầu như cũ:
+
+```kotlin
+import com.mvp93.adsutil.AdPreloaderManager
+
+// Bật preload riêng cho các placement cần thiết sau khi AdManager đã initialize:
+AdPreloaderManager.startNative(context, "YOUR_NATIVE_AD_UNIT_ID")
+AdPreloaderManager.startInterstitial(context, "YOUR_INTERSTITIAL_AD_UNIT_ID", bufferSize = 1)
+
+// AdManager.loadNativeAd / SmallNativeAd / BigNativeAd / showInterstitial
+// sẽ tự động lấy ad từ AdPreloaderManager khi có sẵn.
+```
+
+---
+
+### Bước 10: Quản Lý Trạng Thái VIP / Tắt Quảng Cáo (Remove Ads)
 
 Khi người dùng mua gói Premium hoặc tắt ads qua Remote Config:
 
 ```kotlin
 import com.mvp93.adsutil.AdManager
 
-// Tắt toàn bộ ads và xóa sạch cache trong bộ nhớ:
+// Tắt toàn bộ ads, ẩn/hủy PiP ads, dừng toàn bộ preloader và xóa sạch cache:
 AdManager.setAdsEnabled(false)
 
 // Bật lại khi hết hạn gói:
@@ -403,14 +461,15 @@ Tất cả các Composable `BannerAd`, `SmallNativeAd`, `BigNativeAd` sẽ tự 
 
 | Lớp (Class / Object) | Package Đầy Đủ | Trách nhiệm chính |
 | :--- | :--- | :--- |
-| `AdManager` | `com.mvp93.adsutil.AdManager` | Singleton trung tâm: quản lý khởi tạo, bộ nhớ đệm (Cache), tải và hiển thị Banner, Native, Interstitial, App Open, Rewarded. |
+| `AdManager` | `com.mvp93.adsutil.AdManager` | Singleton trung tâm: quản lý khởi tạo, cache, chống load trùng, tải và hiển thị Banner, Native, Interstitial, App Open, Rewarded, PiP. |
+| `AdPreloaderManager` | `com.mvp93.adsutil.AdPreloaderManager` | Add-on opt-in bọc các `*AdPreloader` của Next-Gen SDK theo từng placement. |
 | `ConsentManager` | `com.mvp93.adsutil.ConsentManager` | Quản lý quy trình Google UMP SDK, kiểm tra consent IAB TCF, hiển thị Privacy Options Form. |
-| `AppOpenManager` | `com.mvp93.adsutil.AppOpenManager` | Lắng nghe vòng đời ứng dụng bằng `ProcessLifecycleOwner` để kích hoạt App Open Ads khi đưa app lên Foreground. |
-| `BannerAd` | `com.mvp93.adsutil.ui.BannerAd` | Jetpack Compose Wrapper cho AdMob Banner, tự động cache và quản lý recomposition. |
-| `SmallNativeAd` | `com.mvp93.adsutil.ui.SmallNativeAd` | Composable hiển thị Native Ad dạng thanh ngang nhỏ gọn, có shimmer loading. |
-| `BigNativeAd` | `com.mvp93.adsutil.ui.BigNativeAd` | Composable hiển thị Native Ad dạng thẻ lớn với MediaView, có shimmer loading. |
+| `AppOpenManager` | `com.mvp93.adsutil.AppOpenManager` | Lắng nghe vòng đời ứng dụng bằng `ProcessLifecycleOwner` để kích hoạt App Open Ads khi đưa app lên Foreground, hỗ trợ cooldown và loại trừ Activity. |
+| `BannerAd` | `com.mvp93.adsutil.ui.BannerAd` | Jetpack Compose Wrapper cho AdMob Banner & Adaptive Banner, tự động cache và quản lý recomposition. |
+| `SmallNativeAd` | `com.mvp93.adsutil.ui.SmallNativeAd` | Composable hiển thị Native Ad dạng thanh ngang nhỏ gọn, hỗ trợ `NativeAdColors` và shimmer loading. |
+| `BigNativeAd` | `com.mvp93.adsutil.ui.BigNativeAd` | Composable hiển thị Native Ad dạng thẻ lớn với MediaView, hỗ trợ `NativeAdColors` và shimmer loading. |
 | `AdsConstants` | `com.mvp93.adsutil.utils.AdsConstants` | Chứa danh sách đầy đủ Google Official Test Ad Unit IDs. |
-| `Extensions` | `com.mvp93.adsutil.utils.Extensions` | Tiện ích `Context.isDebug()` và `Context.showDebugToast()`. |
+| `Extensions` | `com.mvp93.adsutil.utils.Extensions` | Tiện ích `Context.findActivity()`, `Context.isDebug()` và `Context.showDebugToast()`. |
 
 ---
 
@@ -428,6 +487,7 @@ Các ID này được định nghĩa sẵn trong `com.mvp93.adsutil.utils.AdsCon
 | **Interstitial** | `AD_INTERSTITIAL_TEST_ID` | `ca-app-pub-3940256099942544/1033173712` |
 | **App Open** | `ADS_OPEN_APP_TEST_ID` | `ca-app-pub-3940256099942544/9257395921` |
 | **Rewarded** | `AD_REWARDED_TEST_ID` | `ca-app-pub-3940256099942544/5224354917` |
+| **Picture-in-Picture** | `AD_PIP_TEST_ID` | `ca-app-pub-3940256099942544/9657123429` |
 
 ---
 

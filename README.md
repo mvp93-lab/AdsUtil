@@ -7,7 +7,7 @@
 [![Min SDK](https://img.shields.io/badge/Min%20SDK-24-orange.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-blue.svg)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Ready-4285F4.svg)](https://developer.android.com/jetpack/compose)
-[![AdMob SDK](https://img.shields.io/badge/Google%20Ads%20Next--Gen-1.2.1-red.svg)](https://developers.google.com/admob)
+[![AdMob SDK](https://img.shields.io/badge/Google%20Ads%20Next--Gen-1.7.0-red.svg)](https://developers.google.com/admob)
 
 **AdsUtil** is a modern, lightweight Android library designed to integrate and manage **Google AdMob** within **Jetpack Compose** applications seamlessly, automatically, and in strict accordance with the latest Google Play and privacy policies.
 
@@ -17,18 +17,20 @@ Engineered with full type safety and explicit code references, this documentatio
 
 ## 🌟 Key Features
 
-- 🚀 **Google Next-Generation Ads SDK:** Built on top of Google's official Next-Gen Ads SDK (`com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.2.1`), offering non-blocking asynchronous operations powered by Kotlin Coroutines.
+- 🚀 **Google Next-Generation Ads SDK:** Built on top of Google's official Next-Gen Ads SDK (`com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.7.0`), offering non-blocking asynchronous operations powered by Kotlin Coroutines.
 - 🎨 **Jetpack Compose Native:** First-class Composable components (`BannerAd`, `SmallNativeAd`, `BigNativeAd`) ready for instant use without manually constructing an `AndroidView`.
-- ✨ **Shimmer Skeleton Loading:** Built-in animated Shimmer placeholders while native ads load.
+- ✨ **Shimmer & Theme-Aware Native Ads:** Built-in animated Shimmer placeholders and `NativeAdColors` / `NativeAdDefaults` adapting automatically to Material 3 Light/Dark themes.
 - 🛡️ **Automated GDPR / UMP Consent:** Complete encapsulation of Google User Messaging Platform (UMP SDK 4.0.0), checking IAB TCF Purpose 1 consent before requesting ads, and providing an out-of-the-box Privacy Options Form for EEA/UK regulations.
 - ⚡ **Comprehensive Ad Format Support:**
-  - **App Open Ads:** Automatically listens to `ProcessLifecycleOwner` to trigger ads when opening or resuming the application.
-  - **Banner Ads:** Memory-cached by unique keys to prevent reloading across recompositions or tab transitions.
+  - **App Open Ads:** Automatically listens to `ProcessLifecycleOwner` to trigger ads on foreground transitions, with 4-hour expiration tracking, cooldown support, and Activity exclusions.
+  - **Banner & Adaptive Banner Ads:** Memory-cached by unique keys to prevent reloading across recompositions or tab transitions, supporting both standard and anchored adaptive banners (`isAdaptive = true`).
   - **Native Ads:** 2 layouts (Small compact bar & Big card with `MediaView`), adhering to AdChoices requirements and mandatory "Ad" attribution.
-  - **Interstitial Ads:** Asynchronously loaded via coroutines with optional auto-preload flags.
+  - **Interstitial Ads:** Asynchronously loaded via coroutines with in-flight deduplication and optional auto-preload flags.
   - **Rewarded Ads:** Opt-in rewarded format separating reward disbursement from ad dismissal.
+  - **Picture-in-Picture (PiP) Ads:** Floating, draggable corner-snapping ads (`loadPictureInPictureAd` / `showPictureInPictureAd`).
+- 🧩 **Optional AdPreloader Add-on:** Opt-in `AdPreloaderManager` wrapping Google's `*AdPreloader` APIs for zero-wait preloading on selected placements without impacting on-demand flows.
 - 🔒 **Debug Safety:** Automatically replaces production IDs with Google's official Test IDs in debug builds. The `showDebugToast` utility is guaranteed to be a no-op in Release/Production.
-- 💎 **Global Ad Toggle (VIP Mode):** Enable or disable ads across the entire app with a single call (`AdManager.setAdsEnabled(false)`), instantly clearing caches for In-App Purchase / Premium subscriptions.
+- 💎 **Global Ad Toggle (VIP Mode):** Enable or disable ads across the entire app with a single call (`AdManager.setAdsEnabled(false)`), instantly clearing caches and stopping active preloaders/PiP ads for In-App Purchase / Premium subscriptions.
 
 ---
 
@@ -226,9 +228,9 @@ fun PrivacySettingsButton(consentManager: ConsentManager) {
 
 ---
 
-### Step 4: Display Banner Ads
+### Step 4: Display Banner Ads (Standard & Adaptive)
 
-Embed the `BannerAd` Composable. Use a unique `key` for each ad slot to retain and cache the underlying view across recompositions:
+Embed the `BannerAd` Composable. Use a unique `key` for each ad slot to retain and cache the underlying view across recompositions. Set `isAdaptive = true` for anchored adaptive banners:
 
 ```kotlin
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -241,7 +243,8 @@ fun HomeScreenBanner() {
     BannerAd(
         modifier = Modifier.fillMaxWidth(),
         key = "home_screen_bottom_banner", // Unique key to cache and prevent reload during recomposition
-        adUnitId = "YOUR_BANNER_AD_UNIT_ID"
+        adUnitId = "YOUR_BANNER_AD_UNIT_ID",
+        isAdaptive = true
     )
 }
 ```
@@ -250,7 +253,7 @@ fun HomeScreenBanner() {
 
 ### Step 5: Display Native Ads
 
-The library provides 2 ready-to-use layouts compliant with Google's Native Ad policies:
+The library provides 2 ready-to-use layouts compliant with Google's Native Ad policies, automatically themed via `MaterialTheme.colorScheme` (or customized via `NativeAdDefaults.colors(...)` / `NativeAdDefaults.darkColors()`):
 
 #### Small Native Ad (Horizontal compact layout)
 ```kotlin
@@ -373,14 +376,69 @@ fun RewardButton(onRewardGranted: (Int) -> Unit) {
 
 ---
 
-### Step 8: VIP Mode / Remove Ads Toggle
+### Step 8: Picture-in-Picture (PiP) Ads (Beta)
+
+```kotlin
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPosition
+import com.google.android.libraries.ads.mobile.sdk.pip.PictureInPictureAdPresentationScope
+import com.mvp93.adsutil.AdManager
+import kotlinx.coroutines.launch
+
+@Composable
+fun PipAdButton() {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    Button(onClick = {
+        coroutineScope.launch {
+            val isLoaded = AdManager.loadPictureInPictureAd(context, "YOUR_PIP_AD_UNIT_ID")
+            if (isLoaded) {
+                AdManager.showPictureInPictureAd(
+                    context = context,
+                    adUnitId = "YOUR_PIP_AD_UNIT_ID",
+                    position = PictureInPictureAdPosition.BOTTOM_RIGHT,
+                    presentationScope = PictureInPictureAdPresentationScope.SCREEN
+                )
+            }
+        }
+    }) {
+        Text("Show Floating PiP Ad")
+    }
+}
+```
+
+---
+
+### Step 9: Optional Preloading Add-on (`AdPreloaderManager`)
+
+For placements that need instant display without waiting (such as skipping the Native Ad shimmer or pre-buffering high-priority Interstitials), opt in per `adUnitId` using `AdPreloaderManager`. Placements that do not call `start*` remain purely on-demand:
+
+```kotlin
+import com.mvp93.adsutil.AdPreloaderManager
+
+// Start preloading only for specific placements after AdManager is initialized:
+AdPreloaderManager.startNative(context, "YOUR_NATIVE_AD_UNIT_ID")
+AdPreloaderManager.startInterstitial(context, "YOUR_INTERSTITIAL_AD_UNIT_ID", bufferSize = 1)
+
+// AdManager.loadNativeAd / SmallNativeAd / BigNativeAd / showInterstitial
+// automatically poll from AdPreloaderManager when available.
+```
+
+---
+
+### Step 10: VIP Mode / Remove Ads Toggle
 
 When a user purchases a VIP / Ad-free subscription:
 
 ```kotlin
 import com.mvp93.adsutil.AdManager
 
-// Disable all ads across the app & purge memory caches:
+// Disable all ads across the app, hide/destroy PiP ads, stop preloaders & purge caches:
 AdManager.setAdsEnabled(false)
 
 // Re-enable ads if subscription expires:
@@ -404,14 +462,15 @@ To protect your AdMob account from policy violations and accidental self-clicks 
 
 | Class / Object | Full Package | Responsibility |
 | :--- | :--- | :--- |
-| `AdManager` | `com.mvp93.adsutil.AdManager` | Central singleton: initialization, caching, coroutine loading & showing for all ad formats. |
+| `AdManager` | `com.mvp93.adsutil.AdManager` | Central singleton: initialization, caching, deduplicated coroutine loading & showing for all ad formats (including PiP). |
+| `AdPreloaderManager` | `com.mvp93.adsutil.AdPreloaderManager` | Optional opt-in add-on wrapping Google Next-Gen `*AdPreloader` APIs per placement. |
 | `ConsentManager` | `com.mvp93.adsutil.ConsentManager` | Google UMP SDK manager, IAB TCF Purpose 1 consent verification, and Privacy Options form display. |
-| `AppOpenManager` | `com.mvp93.adsutil.AppOpenManager` | Observes `ProcessLifecycleOwner` to trigger App Open Ads on foreground transitions. |
-| `BannerAd` | `com.mvp93.adsutil.ui.BannerAd` | Jetpack Compose wrapper for AdMob Banner, with key-based view caching. |
-| `SmallNativeAd` | `com.mvp93.adsutil.ui.SmallNativeAd` | Composable for compact horizontal Native Ads with shimmer loading. |
-| `BigNativeAd` | `com.mvp93.adsutil.ui.BigNativeAd` | Composable for large card Native Ads with `MediaView` and shimmer loading. |
+| `AppOpenManager` | `com.mvp93.adsutil.AppOpenManager` | Observes `ProcessLifecycleOwner` to trigger App Open Ads on foreground transitions, with cooldown and excluded Activity support. |
+| `BannerAd` | `com.mvp93.adsutil.ui.BannerAd` | Jetpack Compose wrapper for AdMob Banner & Adaptive Banner, with key-based view caching. |
+| `SmallNativeAd` | `com.mvp93.adsutil.ui.SmallNativeAd` | Composable for compact horizontal Native Ads with theme-aware `NativeAdColors` and shimmer loading. |
+| `BigNativeAd` | `com.mvp93.adsutil.ui.BigNativeAd` | Composable for large card Native Ads with `MediaView`, theme-aware `NativeAdColors`, and shimmer loading. |
 | `AdsConstants` | `com.mvp93.adsutil.utils.AdsConstants` | Official Google AdMob test IDs for all formats. |
-| `Extensions` | `com.mvp93.adsutil.utils.Extensions` | Safe utilities: `Context.isDebug()` and `Context.showDebugToast()`. |
+| `Extensions` | `com.mvp93.adsutil.utils.Extensions` | Safe utilities: `Context.findActivity()`, `Context.isDebug()`, and `Context.showDebugToast()`. |
 
 ---
 
@@ -429,6 +488,7 @@ Accessible via `com.mvp93.adsutil.utils.AdsConstants`:
 | **Interstitial** | `AD_INTERSTITIAL_TEST_ID` | `ca-app-pub-3940256099942544/1033173712` |
 | **App Open** | `ADS_OPEN_APP_TEST_ID` | `ca-app-pub-3940256099942544/9257395921` |
 | **Rewarded** | `AD_REWARDED_TEST_ID` | `ca-app-pub-3940256099942544/5224354917` |
+| **Picture-in-Picture** | `AD_PIP_TEST_ID` | `ca-app-pub-3940256099942544/9657123429` |
 
 ---
 
