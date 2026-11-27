@@ -115,12 +115,14 @@ private fun rememberNativeAdState(
     isInitialized: Boolean
 ): NativeAdState {
     val context = LocalContext.current
-    var nativeAd by remember(screenTag) { mutableStateOf(AdManager.getCachedNativeAd(screenTag)) }
-    var isLoading by remember(screenTag) { mutableStateOf(nativeAd == null) }
+    var nativeAd by remember(screenTag, adUnitId) {
+        mutableStateOf(AdManager.getCachedNativeAd(screenTag, adUnitId))
+    }
+    var isLoading by remember(screenTag, adUnitId) { mutableStateOf(nativeAd == null) }
 
     LaunchedEffect(adUnitId, screenTag, isInitialized) {
         if (!isInitialized) return@LaunchedEffect
-        val cached = AdManager.getCachedNativeAd(screenTag)
+        val cached = AdManager.getCachedNativeAd(screenTag, adUnitId)
         if (cached != null) {
             nativeAd = cached
             isLoading = false

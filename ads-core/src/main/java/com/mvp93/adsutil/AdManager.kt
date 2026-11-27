@@ -68,14 +68,19 @@ object AdManager {
 
     private data class CachedBanner(
         val adView: AdView,
-        val adUnitId: String,
+        val requestedAdUnitId: String,
         val adSize: AdSize
+    )
+
+    private data class CachedNativeAd(
+        val ad: NativeAd,
+        val requestedAdUnitId: String
     )
 
     private val interstitialCache = ConcurrentHashMap<String, InterstitialAd>()
     private val interstitialLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val bannerCache = ConcurrentHashMap<String, CachedBanner>()
-    private val nativeAdCache = ConcurrentHashMap<String, NativeAd>()
+    private val nativeAdCache = ConcurrentHashMap<String, CachedNativeAd>()
     private val rewardedCache = ConcurrentHashMap<String, RewardedAd>()
     private val rewardedLoads = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val pipCache = ConcurrentHashMap<String, PictureInPictureAd>()
@@ -139,7 +144,10 @@ object AdManager {
         }
     }
 
-    fun getCachedNativeAd(screenTag: String): NativeAd? = nativeAdCache[screenTag]
+    fun getCachedNativeAd(screenTag: String): NativeAd? = nativeAdCache[screenTag]?.ad
+
+    internal fun getCachedNativeAd(screenTag: String, adUnitId: String): NativeAd? =
+        nativeAdCache[screenTag]?.takeIf { it.requestedAdUnitId == adUnitId }?.ad
 
     suspend fun initialize(context: Context, appId: String) {
         if (_isInitialized.value) return
@@ -232,7 +240,7 @@ object AdManager {
         val currentActivity = context.findActivity()
         bannerCache[key]?.let { cached ->
             val cachedActivity = cached.adView.context.findActivity()
-            val isStale = cached.adUnitId != finalAdUnitId ||
+            val isStale = cached.requestedAdUnitId != adUnitId ||
                 cached.adSize != adSize ||
                 cachedActivity == null ||
                 !cachedActivity.isUsableForAd() ||
@@ -247,7 +255,7 @@ object AdManager {
 
         Log.d("AdManager", "Creating new BannerAd instance for key: $key with ID: $finalAdUnitId, size: $adSize")
         val newAdView = AdView(context)
-        val newEntry = CachedBanner(adView = newAdView, adUnitId = finalAdUnitId, adSize = adSize)
+        val newEntry = CachedBanner(adView = newAdView, requestedAdUnitId = adUnitId, adSize = adSize)
         val existing = bannerCache.putIfAbsent(key, newEntry)
         if (existing != null) {
             destroyAdViewsOnMain(listOf(newAdView))
@@ -425,15 +433,15 @@ object AdManager {
             return
         }
 
-        // Return cached ad for this specific screen if available
-        nativeAdCache[screenTag]?.let {
-            onAdLoaded(it)
+        // Return cached ad for this specific screen and adUnitId if available
+        nativeAdCache[screenTag]?.takeIf { it.requestedAdUnitId == adUnitId }?.let {
+            onAdLoaded(it.ad)
             return
         }
 
         // Use opt-in preloaded native ad immediately if available for this adUnitId
         AdPreloaderManager.pollNativeIfActive(adUnitId)?.let { preloaded ->
-            nativeAdCache[screenTag] = preloaded
+            nativeAdCache[screenTag] = CachedNativeAd(ad = preloaded, requestedAdUnitId = adUnitId)
             onAdLoaded(preloaded)
             return
         }
@@ -449,7 +457,7 @@ object AdManager {
                     onAdFailed(LoadAdError(LoadAdError.ErrorCode.INTERNAL_ERROR, "Ads disabled by remote config"))
                     return
                 }
-                nativeAdCache[screenTag] = nativeAd
+                nativeAdCache[screenTag] = CachedNativeAd(ad = nativeAd, requestedAdUnitId = adUnitId)
                 onAdLoaded(nativeAd)
             }
 
