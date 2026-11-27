@@ -3,6 +3,7 @@ package com.mvp93.adsutil
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -11,6 +12,8 @@ import com.mvp93.adsutil.utils.showDebugToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -23,10 +26,34 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
     private var currentActivity: Activity? = null
     private var adUnitId: String = ""
     private var isLoadingAd: Boolean = false
+    private var isShowingAd: Boolean = false
+    private var lastAdDismissedTimeMs: Long = 0L
+    private var cooldownMillis: Long = 0L
+    private val excludedActivityClasses = mutableSetOf<Class<out Activity>>()
 
     init {
         application.registerActivityLifecycleCallbacks(this)
-        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        } else {
+            scope.launch {
+                ProcessLifecycleOwner.get().lifecycle.addObserver(this@AppOpenManager)
+            }
+        }
+
+        // Automatically preload once AdManager finishes initialization (after UMP consent)
+        // or when ads are re-enabled after being disabled.
+        scope.launch {
+            combine(AdManager.isInitialized, AdManager.isAdsEnabled) { initialized, enabled ->
+                initialized && enabled
+            }
+                .distinctUntilChanged()
+                .collect { canLoad ->
+                    if (canLoad && adUnitId.isNotEmpty() && !AdManager.isAppOpenAdAvailable()) {
+                        preloadAd("App Open Ad Preloaded")
+                    }
+                }
+        }
     }
 
     fun setAdUnitId(id: String) {
@@ -34,8 +61,30 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
         preloadAd("App Open Ad Preloaded")
     }
 
+    /**
+     * Sets a minimum cooldown duration between consecutive App Open Ad displays.
+     */
+    fun setCooldownMillis(cooldownMs: Long) {
+        this.cooldownMillis = cooldownMs.coerceAtLeast(0L)
+    }
+
+    /**
+     * Excludes specific [Activity] classes (e.g., Splash, Onboarding, Consent) from showing App Open Ads.
+     */
+    fun setExcludedActivities(vararg activityClasses: Class<out Activity>) {
+        excludedActivityClasses.clear()
+        excludedActivityClasses.addAll(activityClasses)
+    }
+
     private fun preloadAd(debugToastMessage: String) {
-        if (adUnitId.isEmpty() || isLoadingAd || !AdManager.isAdsEnabled.value) return
+        if (adUnitId.isEmpty() ||
+            isLoadingAd ||
+            !AdManager.isInitialized.value ||
+            !AdManager.isAdsEnabled.value ||
+            AdManager.isAppOpenAdAvailable()
+        ) {
+            return
+        }
         isLoadingAd = true
         scope.launch {
             try {
@@ -53,14 +102,35 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
      * Shows the app open ad if one is available and the app is in the foreground.
      */
     private fun showAdIfAvailable() {
-        if (!AdManager.isAdsEnabled.value || adUnitId.isEmpty()) return
+        if (isShowingAd ||
+            !AdManager.isInitialized.value ||
+            !AdManager.isAdsEnabled.value ||
+            adUnitId.isEmpty()
+        ) {
+            return
+        }
+
+        if (cooldownMillis > 0L && lastAdDismissedTimeMs > 0L) {
+            val elapsed = System.currentTimeMillis() - lastAdDismissedTimeMs
+            if (elapsed < cooldownMillis) {
+                Log.d("AppOpenManager", "Skipping App Open Ad: cooldown active (${elapsed}ms < ${cooldownMillis}ms)")
+                return
+            }
+        }
 
         val activity = currentActivity ?: return
         if (activity.isFinishing || activity.isDestroyed) return
+        if (excludedActivityClasses.any { it.isInstance(activity) }) {
+            Log.d("AppOpenManager", "Skipping App Open Ad: ${activity::class.java.simpleName} is excluded")
+            return
+        }
 
         if (AdManager.isAppOpenAdAvailable()) {
             Log.d("AppOpenManager", "Showing App Open Ad")
+            isShowingAd = true
             AdManager.showAppOpenAd(activity) {
+                isShowingAd = false
+                lastAdDismissedTimeMs = System.currentTimeMillis()
                 preloadAd("App Open Ad Reloaded")
             }
         } else {

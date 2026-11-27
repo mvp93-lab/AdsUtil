@@ -44,12 +44,21 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
 object AdManager {
+    internal const val APP_OPEN_AD_EXPIRATION_MS = 4 * 60 * 60 * 1000L
+
+    private data class CachedAppOpenAd(
+        val ad: AppOpenAd,
+        val loadedAtMs: Long
+    )
+
     private val interstitialCache = ConcurrentHashMap<String, InterstitialAd>()
     private val bannerCache = ConcurrentHashMap<String, AdView>()
     private val nativeAdCache = ConcurrentHashMap<String, NativeAd>()
     private val rewardedCache = ConcurrentHashMap<String, RewardedAd>()
     @Volatile
-    private var appOpenAdCache: AppOpenAd? = null
+    private var appOpenAdCache: CachedAppOpenAd? = null
+    private val appOpenLoadMutex = Mutex()
+    internal var clockMs: () -> Long = System::currentTimeMillis
 
     private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     private val initMutex = Mutex()
@@ -149,8 +158,10 @@ object AdManager {
         if (callback == null) return
         if (activity != null && !activity.isDestroyed) {
             activity.runOnUiThread { callback() }
-        } else {
+        } else if (Looper.myLooper() == Looper.getMainLooper()) {
             callback()
+        } else {
+            scope.launch { callback() }
         }
     }
 
@@ -313,30 +324,53 @@ object AdManager {
         })
     }
 
+    internal fun isAppOpenAdValid(loadedAtMs: Long, nowMs: Long = clockMs()): Boolean {
+        val elapsed = nowMs - loadedAtMs
+        return elapsed in 0 until APP_OPEN_AD_EXPIRATION_MS
+    }
+
+    private fun getValidAppOpenAd(): AppOpenAd? {
+        val cached = appOpenAdCache ?: return null
+        if (!isAppOpenAdValid(cached.loadedAtMs)) {
+            appOpenAdCache = null
+            Log.d("AdManager", "Cached AppOpenAd expired, discarding")
+            return null
+        }
+        return cached.ad
+    }
+
     suspend fun loadAppOpenAd(
         context: Context,
         adUnitId: String
     ): Boolean {
         if (!canLoadAd("appOpen")) return false
 
-        val appContext = context.applicationContext
-        val finalAdUnitId = if (appContext.isDebug()) AdsConstants.ADS_OPEN_APP_TEST_ID else adUnitId
-        val request = AdRequest.Builder(finalAdUnitId).build()
+        return appOpenLoadMutex.withLock {
+            if (!canLoadAd("appOpen")) return@withLock false
+            if (getValidAppOpenAd() != null) {
+                Log.d("AdManager", "AppOpenAd already cached and valid, skipping duplicate load")
+                return@withLock true
+            }
 
-        return suspendCancellableCoroutine { continuation ->
-            AppOpenAd.load(request, object : AdLoadCallback<AppOpenAd> {
-                override fun onAdLoaded(ad: AppOpenAd) {
-                    appOpenAdCache = ad
-                    Log.d("AdManager", "AppOpenAd loaded successfully")
-                    if (continuation.isActive) continuation.resume(true)
-                }
+            val appContext = context.applicationContext
+            val finalAdUnitId = if (appContext.isDebug()) AdsConstants.ADS_OPEN_APP_TEST_ID else adUnitId
+            val request = AdRequest.Builder(finalAdUnitId).build()
 
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    appOpenAdCache = null
-                    Log.e("AdManager", "AppOpenAd failed to load: ${adError.message}")
-                    if (continuation.isActive) continuation.resume(false)
-                }
-            })
+            suspendCancellableCoroutine { continuation ->
+                AppOpenAd.load(request, object : AdLoadCallback<AppOpenAd> {
+                    override fun onAdLoaded(ad: AppOpenAd) {
+                        appOpenAdCache = CachedAppOpenAd(ad = ad, loadedAtMs = clockMs())
+                        Log.d("AdManager", "AppOpenAd loaded successfully")
+                        if (continuation.isActive) continuation.resume(true)
+                    }
+
+                    override fun onAdFailedToLoad(adError: LoadAdError) {
+                        appOpenAdCache = null
+                        Log.e("AdManager", "AppOpenAd failed to load: ${adError.message}")
+                        if (continuation.isActive) continuation.resume(false)
+                    }
+                })
+            }
         }
     }
 
@@ -344,7 +378,7 @@ object AdManager {
         activity: Activity,
         onAdDismissed: (() -> Unit)? = null
     ) {
-        val ad = appOpenAdCache
+        val ad = getValidAppOpenAd()
         if (!_isAdsEnabled.value || ad == null || !activity.isUsableForAd()) {
             invokeOnUiThread(activity, onAdDismissed)
             return
@@ -366,7 +400,7 @@ object AdManager {
         ad.show(activity)
     }
 
-    fun isAppOpenAdAvailable(): Boolean = appOpenAdCache != null
+    fun isAppOpenAdAvailable(): Boolean = getValidAppOpenAd() != null
 
     fun isRewardedAdLoaded(adUnitId: String): Boolean = rewardedCache.containsKey(adUnitId)
 

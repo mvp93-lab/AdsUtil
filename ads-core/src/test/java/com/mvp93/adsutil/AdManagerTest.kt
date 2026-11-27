@@ -41,4 +41,13 @@ class AdManagerTest {
             ConsentManager.DEFAULT_TEST_DEVICE_IDS
         )
     }
+
+    @Test
+    fun `isAppOpenAdValid enforces 4 hour expiration window`() {
+        val loadedAt = 1_000_000L
+        assertTrue(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt))
+        assertTrue(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt + AdManager.APP_OPEN_AD_EXPIRATION_MS - 1))
+        assertFalse(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt + AdManager.APP_OPEN_AD_EXPIRATION_MS))
+        assertFalse(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt - 1))
+    }
 }
