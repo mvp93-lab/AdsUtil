@@ -31,7 +31,7 @@ fun BannerAd(
     if (!isAdsEnabled || !isInitialized) return
 
     // Retrieve or create the AdView from the Manager cache
-    val adView = remember(key, isInitialized) {
+    val adView = remember(key, adUnitId, isInitialized) {
         AdManager.getOrCreateBanner(context, key, adUnitId)
     }
 

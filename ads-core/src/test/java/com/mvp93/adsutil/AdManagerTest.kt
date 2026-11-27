@@ -1,12 +1,17 @@
 package com.mvp93.adsutil
 
 import com.mvp93.adsutil.utils.AdsConstants
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class AdManagerTest {
 
@@ -49,5 +54,83 @@ class AdManagerTest {
         assertTrue(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt + AdManager.APP_OPEN_AD_EXPIRATION_MS - 1))
         assertFalse(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt + AdManager.APP_OPEN_AD_EXPIRATION_MS))
         assertFalse(AdManager.isAppOpenAdValid(loadedAt, nowMs = loadedAt - 1))
+    }
+
+    @Test
+    fun `deduplicateLoad returns true immediately when ad is already cached`() = runBlocking {
+        val cache = ConcurrentHashMap<String, String>()
+        val inFlight = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+        cache["unit_1"] = "cached_ad"
+        val invocations = AtomicInteger(0)
+
+        val loaded = AdManager.deduplicateLoad(
+            key = "unit_1",
+            cache = cache,
+            inFlightLoads = inFlight
+        ) { _, _ ->
+            invocations.incrementAndGet()
+        }
+
+        assertTrue(loaded)
+        assertEquals(0, invocations.get())
+    }
+
+    @Test
+    fun `deduplicateLoad shares single in-flight request for same adUnitId`() = runBlocking {
+        val cache = ConcurrentHashMap<String, String>()
+        val inFlight = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+        val invocations = AtomicInteger(0)
+        var completeSuccess: ((String) -> Unit)? = null
+
+        val first = async {
+            AdManager.deduplicateLoad(
+                key = "unit_1",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { onLoaded, _ ->
+                invocations.incrementAndGet()
+                completeSuccess = onLoaded
+            }
+        }
+        val second = async {
+            AdManager.deduplicateLoad(
+                key = "unit_1",
+                cache = cache,
+                inFlightLoads = inFlight
+            ) { _, _ ->
+                invocations.incrementAndGet()
+            }
+        }
+
+        // Allow coroutines to reach the suspended await point
+        while (completeSuccess == null) {
+            kotlinx.coroutines.yield()
+        }
+        completeSuccess!!.invoke("loaded_ad")
+
+        assertTrue(first.await())
+        assertTrue(second.await())
+        assertEquals(1, invocations.get())
+        assertEquals("loaded_ad", cache["unit_1"])
+        assertTrue(inFlight.isEmpty())
+    }
+
+    @Test
+    fun `deduplicateLoad does not store ad when shouldStore returns false`() = runBlocking {
+        val cache = ConcurrentHashMap<String, String>()
+        val inFlight = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
+        val loaded = AdManager.deduplicateLoad(
+            key = "unit_1",
+            cache = cache,
+            inFlightLoads = inFlight,
+            shouldStore = { false }
+        ) { onLoaded, _ ->
+            onLoaded("loaded_ad")
+        }
+
+        assertFalse(loaded)
+        assertFalse(cache.containsKey("unit_1"))
+        assertTrue(inFlight.isEmpty())
     }
 }
