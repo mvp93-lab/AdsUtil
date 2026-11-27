@@ -49,7 +49,7 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
             }
                 .distinctUntilChanged()
                 .collect { canLoad ->
-                    if (canLoad && adUnitId.isNotEmpty() && !AdManager.isAppOpenAdAvailable()) {
+                    if (canLoad && adUnitId.isNotEmpty() && !AdManager.isAppOpenAdAvailable(adUnitId)) {
                         preloadAd("App Open Ad Preloaded")
                     }
                 }
@@ -81,7 +81,8 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
             isLoadingAd ||
             !AdManager.isInitialized.value ||
             !AdManager.isAdsEnabled.value ||
-            AdManager.isAppOpenAdAvailable()
+            AdPreloaderManager.isAppOpenActive(adUnitId) ||
+            AdManager.isAppOpenAdAvailable(adUnitId)
         ) {
             return
         }
@@ -125,10 +126,10 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
             return
         }
 
-        if (AdManager.isAppOpenAdAvailable()) {
+        if (AdManager.isAppOpenAdAvailable(adUnitId)) {
             Log.d("AppOpenManager", "Showing App Open Ad")
             isShowingAd = true
-            AdManager.showAppOpenAd(activity) {
+            AdManager.showAppOpenAd(activity, adUnitId) {
                 isShowingAd = false
                 lastAdDismissedTimeMs = System.currentTimeMillis()
                 preloadAd("App Open Ad Reloaded")

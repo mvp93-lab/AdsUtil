@@ -149,6 +149,9 @@ object AdPreloaderManager {
         callback = callback
     )
 
+    internal fun isAppOpenActive(adUnitId: String): Boolean =
+        activeAppOpenIds.contains(adUnitId)
+
     fun isAppOpenAvailable(adUnitId: String): Boolean =
         activeAppOpenIds.contains(adUnitId) && AppOpenAdPreloader.isAdAvailable(adUnitId)
 

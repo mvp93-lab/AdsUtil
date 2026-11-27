@@ -566,6 +566,9 @@ object AdManager {
 
     fun isAppOpenAdAvailable(): Boolean = getValidAppOpenAd() != null
 
+    fun isAppOpenAdAvailable(adUnitId: String): Boolean =
+        getValidAppOpenAd() != null || AdPreloaderManager.isAppOpenAvailable(adUnitId)
+
     fun isRewardedAdLoaded(adUnitId: String): Boolean =
         rewardedCache.containsKey(adUnitId) || AdPreloaderManager.isRewardedAvailable(adUnitId)
 
