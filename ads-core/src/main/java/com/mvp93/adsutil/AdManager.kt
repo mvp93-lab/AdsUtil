@@ -101,6 +101,7 @@ object AdManager {
             interstitialCache.clear()
             rewardedCache.clear()
             appOpenAdCache = null
+            AdPreloaderManager.stopAll()
         }
     }
 
@@ -336,6 +337,9 @@ object AdManager {
         }
     }
 
+    fun isInterstitialLoaded(adUnitId: String): Boolean =
+        interstitialCache.containsKey(adUnitId) || AdPreloaderManager.isInterstitialAvailable(adUnitId)
+
     fun showInterstitial(
         context: Context,
         adUnitId: String,
@@ -354,7 +358,9 @@ object AdManager {
             return
         }
 
-        val ad = interstitialCache.remove(adUnitId)
+        val cachedAd = interstitialCache.remove(adUnitId)
+        val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollInterstitialIfActive(adUnitId) else null
+        val ad = cachedAd ?: preloadedAd
         if (ad == null) {
             Log.e("AdManager", "Interstitial not ready for ID: $adUnitId")
             invokeOnUiThread(activity, onAdClosed)
@@ -362,10 +368,11 @@ object AdManager {
         }
 
         val appContext = context.applicationContext
+        val shouldReloadManually = reloadAfterShow && preloadedAd == null
         ad.adEventCallback = object : InterstitialAdEventCallback {
             override fun onAdDismissedFullScreenContent() {
                 Log.d("AdManager", "Interstitial dismissed for ID: $adUnitId")
-                if (reloadAfterShow) {
+                if (shouldReloadManually) {
                     scope.launch {
                         loadInterstitial(appContext, adUnitId)
                     }
@@ -375,7 +382,7 @@ object AdManager {
 
             override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                 Log.e("AdManager", "Interstitial failed to show: ${fullScreenContentError.message}")
-                if (reloadAfterShow) {
+                if (shouldReloadManually) {
                     scope.launch {
                         loadInterstitial(appContext, adUnitId)
                     }
@@ -410,6 +417,13 @@ object AdManager {
         // Return cached ad for this specific screen if available
         nativeAdCache[screenTag]?.let {
             onAdLoaded(it)
+            return
+        }
+
+        // Use opt-in preloaded native ad immediately if available for this adUnitId
+        AdPreloaderManager.pollNativeIfActive(adUnitId)?.let { preloaded ->
+            nativeAdCache[screenTag] = preloaded
+            onAdLoaded(preloaded)
             return
         }
 
@@ -487,17 +501,45 @@ object AdManager {
             invokeOnUiThread(activity, onAdDismissed)
             return
         }
+        attachAndShowAppOpenAd(activity, ad, clearCacheOnClose = true, onAdDismissed = onAdDismissed)
+    }
 
+    fun showAppOpenAd(
+        activity: Activity,
+        adUnitId: String,
+        onAdDismissed: (() -> Unit)? = null
+    ) {
+        val ad = getValidAppOpenAd()
+        val preloadedAd = if (ad == null) AdPreloaderManager.pollAppOpenIfActive(adUnitId) else null
+        val targetAd = ad ?: preloadedAd
+        if (!_isAdsEnabled.value || targetAd == null || !activity.isUsableForAd()) {
+            invokeOnUiThread(activity, onAdDismissed)
+            return
+        }
+        attachAndShowAppOpenAd(
+            activity = activity,
+            ad = targetAd,
+            clearCacheOnClose = ad != null,
+            onAdDismissed = onAdDismissed
+        )
+    }
+
+    private fun attachAndShowAppOpenAd(
+        activity: Activity,
+        ad: AppOpenAd,
+        clearCacheOnClose: Boolean,
+        onAdDismissed: (() -> Unit)?
+    ) {
         ad.adEventCallback = object : AppOpenAdEventCallback {
             override fun onAdDismissedFullScreenContent() {
                 Log.d("AdManager", "AppOpenAd dismissed")
-                appOpenAdCache = null
+                if (clearCacheOnClose) appOpenAdCache = null
                 invokeOnUiThread(activity, onAdDismissed)
             }
 
             override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                 Log.e("AdManager", "AppOpenAd failed to show: ${fullScreenContentError.message}")
-                appOpenAdCache = null
+                if (clearCacheOnClose) appOpenAdCache = null
                 invokeOnUiThread(activity, onAdDismissed)
             }
         }
@@ -506,7 +548,8 @@ object AdManager {
 
     fun isAppOpenAdAvailable(): Boolean = getValidAppOpenAd() != null
 
-    fun isRewardedAdLoaded(adUnitId: String): Boolean = rewardedCache.containsKey(adUnitId)
+    fun isRewardedAdLoaded(adUnitId: String): Boolean =
+        rewardedCache.containsKey(adUnitId) || AdPreloaderManager.isRewardedAvailable(adUnitId)
 
     suspend fun loadRewarded(
         context: Context,
@@ -557,7 +600,9 @@ object AdManager {
             return
         }
 
-        val ad = rewardedCache.remove(adUnitId)
+        val cachedAd = rewardedCache.remove(adUnitId)
+        val preloadedAd = if (cachedAd == null) AdPreloaderManager.pollRewardedIfActive(adUnitId) else null
+        val ad = cachedAd ?: preloadedAd
         if (ad == null) {
             Log.e("AdManager", "Rewarded ad not ready for ID: $adUnitId")
             invokeOnUiThread(activity, onAdClosed)
@@ -565,10 +610,11 @@ object AdManager {
         }
 
         val appContext = context.applicationContext
+        val shouldReloadManually = reloadAfterShow && preloadedAd == null
         ad.adEventCallback = object : RewardedAdEventCallback {
             override fun onAdDismissedFullScreenContent() {
                 Log.d("AdManager", "Rewarded ad dismissed for ID: $adUnitId")
-                if (reloadAfterShow) {
+                if (shouldReloadManually) {
                     scope.launch {
                         loadRewarded(appContext, adUnitId)
                     }
@@ -578,7 +624,7 @@ object AdManager {
 
             override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                 Log.e("AdManager", "Rewarded ad failed to show: ${fullScreenContentError.message}")
-                if (reloadAfterShow) {
+                if (shouldReloadManually) {
                     scope.launch {
                         loadRewarded(appContext, adUnitId)
                     }

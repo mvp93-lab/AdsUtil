@@ -214,4 +214,20 @@ class AdManagerTest {
             assertTrue("Expected Google test prefix for $id", id.startsWith(testPrefix))
         }
     }
+
+    @Test
+    fun `AdPreloaderManager has no active preloaders initially and stopAll is safe no-op`() {
+        assertFalse(AdPreloaderManager.isInterstitialAvailable(AdsConstants.AD_INTERSTITIAL_TEST_ID))
+        assertFalse(AdPreloaderManager.isRewardedAvailable(AdsConstants.AD_REWARDED_TEST_ID))
+        assertFalse(AdPreloaderManager.isAppOpenAvailable(AdsConstants.ADS_OPEN_APP_TEST_ID))
+        assertFalse(AdPreloaderManager.isNativeAvailable(AdsConstants.AD_NATIVE_TEST_ID))
+        assertFalse(AdManager.isInterstitialLoaded(AdsConstants.AD_INTERSTITIAL_TEST_ID))
+
+        assertNull(AdPreloaderManager.pollInterstitialIfActive(AdsConstants.AD_INTERSTITIAL_TEST_ID))
+        assertNull(AdPreloaderManager.pollRewardedIfActive(AdsConstants.AD_REWARDED_TEST_ID))
+        assertNull(AdPreloaderManager.pollAppOpenIfActive(AdsConstants.ADS_OPEN_APP_TEST_ID))
+        assertNull(AdPreloaderManager.pollNativeIfActive(AdsConstants.AD_NATIVE_TEST_ID))
+
+        AdPreloaderManager.stopAll()
+    }
 }
