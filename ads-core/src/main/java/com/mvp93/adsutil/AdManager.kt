@@ -533,7 +533,7 @@ object AdManager {
         activity: Activity,
         onAdDismissed: (() -> Unit)? = null
     ) {
-        showAppOpenInternal(activity, adUnitId = null, onAdDismissed = onAdDismissed)
+        showAppOpenAdWithOutcome(activity, adUnitId = null) { onAdDismissed?.invoke() }
     }
 
     fun showAppOpenAd(
@@ -541,37 +541,37 @@ object AdManager {
         adUnitId: String,
         onAdDismissed: (() -> Unit)? = null
     ) {
-        showAppOpenInternal(activity, adUnitId = adUnitId, onAdDismissed = onAdDismissed)
+        showAppOpenAdWithOutcome(activity, adUnitId = adUnitId) { onAdDismissed?.invoke() }
     }
 
-    private fun showAppOpenInternal(
+    internal fun showAppOpenAdWithOutcome(
         activity: Activity,
         adUnitId: String?,
-        onAdDismissed: (() -> Unit)?
+        onFinished: (wasShown: Boolean) -> Unit
     ) {
         if (!_isAdsEnabled.value || !activity.isUsableForAd()) {
-            invokeOnUiThread(activity, onAdDismissed)
+            invokeOnUiThread(activity) { onFinished(false) }
             return
         }
         val ad = takeValidAppOpenAd() ?: adUnitId?.let { AdPreloaderManager.pollAppOpenIfActive(it) }
         if (ad == null) {
-            invokeOnUiThread(activity, onAdDismissed)
+            invokeOnUiThread(activity) { onFinished(false) }
             return
         }
         runOnMain {
             if (!activity.isUsableForAd()) {
-                invokeOnUiThread(activity, onAdDismissed)
+                invokeOnUiThread(activity) { onFinished(false) }
                 return@runOnMain
             }
             ad.adEventCallback = object : AppOpenAdEventCallback {
                 override fun onAdDismissedFullScreenContent() {
                     Log.d("AdManager", "AppOpenAd dismissed")
-                    invokeOnUiThread(activity, onAdDismissed)
+                    invokeOnUiThread(activity) { onFinished(true) }
                 }
 
                 override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                     Log.e("AdManager", "AppOpenAd failed to show: ${fullScreenContentError.message}")
-                    invokeOnUiThread(activity, onAdDismissed)
+                    invokeOnUiThread(activity) { onFinished(false) }
                 }
             }
             ad.show(activity)

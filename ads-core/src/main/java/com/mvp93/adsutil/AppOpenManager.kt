@@ -129,9 +129,11 @@ class AppOpenManager(private val application: Application) : DefaultLifecycleObs
         if (AdManager.isAppOpenAdAvailable(adUnitId)) {
             Log.d("AppOpenManager", "Showing App Open Ad")
             isShowingAd = true
-            AdManager.showAppOpenAd(activity, adUnitId) {
+            AdManager.showAppOpenAdWithOutcome(activity, adUnitId) { wasShown ->
                 isShowingAd = false
-                lastAdDismissedTimeMs = System.currentTimeMillis()
+                if (wasShown) {
+                    lastAdDismissedTimeMs = System.currentTimeMillis()
+                }
                 preloadAd("App Open Ad Reloaded")
             }
         } else {
